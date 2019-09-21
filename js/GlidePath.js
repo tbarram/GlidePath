@@ -26,9 +26,33 @@ function rnd(min, max)
 }
 
 /*---------------------------------------------------------------------------*/
+const kMaxNumObjects = 256;
+const kRotateSpeed = 7;
+const kThrustSpeed = 500;
+
+/*---------------------------------------------------------------------------*/
 var gNowMS = Date.now();
 var gObjects = [];
-const kMaxNumObjects = 256;
+let gShipObject = {};
+let gShipAngle = 0;
+let gShipAngleCos = Math.cos(gShipAngle);
+let gShipAngleSin = Math.sin(gShipAngle);
+let gThrusting = false;
+let gAngleStart = 0;
+let gShipBlinkEndMS_RotateMS = 0;
+let gWasRotating = false;
+let gNumRotations = 0;
+let gNextBlinkMS = 0;
+let gBlink = false;
+let gNumActiveObjects = 0;
+let gLastShootMS = 0;
+
+/*---------------------------------------------------------------------------*/
+const M_PI = Math.PI;
+const M_2PI = (2 * M_PI);
+const M_PI_4 = (M_PI / 4);
+const M_PI_8 = (M_PI / 8);
+const M_3PI_8 = (3 * M_PI / 8);
 
 /*---------------------------------------------------------------------------*/
 const types = 
@@ -94,30 +118,6 @@ function Point(x, y)
 	this.x = x;
 	this.y = y;
 }
-
-/*---------------------------------------------------------------------------*/
-let gShipObject = {};
-let gShipAngle = 0;
-let gShipAngleCos = Math.cos(gShipAngle);
-let gShipAngleSin = Math.sin(gShipAngle);
-let gThrusting = false;
-let gAngleStart = 0;
-let gShipBlinkEndMS_RotateMS = 0;
-let gWasRotating = false;
-let gNumRotations = 0;
-let gNextBlinkMS = 0;
-let gBlink = false;
-let gNumActiveObjects = 0;
-let gLastShootMS = 0;
-
-const kRotateSpeed = 7;
-const kThrustSpeed = 500;
-
-const M_PI = Math.PI;
-const M_2PI = (2 * M_PI);
-const M_PI_4 = (M_PI / 4);
-const M_PI_8 = (M_PI / 8);
-const M_3PI_8 = (3 * M_PI / 8);
 
 /*---------------------------------------------------------------------------*/
 // rotate point p around center point c
@@ -303,7 +303,7 @@ Object.prototype.adjustBounds = function()
 		else if (this.x < 0)
 			this.x = canvas.width;
 
-		// some friction
+		// some horiz friction 
 		this.accX = (this.velX > 0) ? -10 : 10;
 	}
 }
@@ -361,10 +361,9 @@ var Explosion = function(x, y)
 /*---------------------------------------------------------------------------*/
 var NewFallingObject = function()
 {
-	const m = 10; // margin
-	const x = rnd(m, (canvas.width - m)); // random horiz start
+	const x = RandomWidth(10); // random horiz start
 	const accelY = rnd(40, 160);
-	new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, "green", rnd(8,20));
+	new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), rnd(8,20));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -603,30 +602,37 @@ var DoExplosions = function ()
 }
 
 /*---------------------------------------------------------------------------*/
+var RandomColor = function () 
+{
+	return 'rgb(' + rnd(0,255) + ',' + rnd(0,255) + ',' + rnd(0,255) +')';
+}
+
+/*---------------------------------------------------------------------------*/
+var RandomWidth = function (margin) 
+{
+	return rnd(margin, canvas.width - margin);
+}
+
+/*---------------------------------------------------------------------------*/
+var RandomHeight = function (margin) 
+{
+	return rnd(margin, canvas.height - margin);
+}
+
+/*---------------------------------------------------------------------------*/
 var Init = function () 
 {
-	DoExplosions();
-
-	NewFallingObject();
-	NewFallingObject();
-	NewFallingObject();
-	NewFallingObject();
-	NewFallingObject();
-
-	NewImageObject(150, 150, 10, -10, 0, 0, "images/monster.png");
-	NewImageObject(150, 15, -7, 12, 0, 0, "images/hero.png");
-	NewImageObject(250, 150, -4, 5, 0, 0, "images/hero.png");
-	NewImageObject(100, 250, 12, 0, 0, 0, "images/hero.png");
-	NewImageObject(60, 15, -10, 5, 0, 0, "images/hero.png");
-
-	new Object(types.CIRCLE,150,150,10,10,0,0,"yellow",20);
-	new Object(types.CIRCLE,250,150,-10,-10,0,0,"green",20);
-	new Object(types.CIRCLE,150,150,10,10,0,0,"orange",20);
-	new Object(types.CIRCLE,250,150,-10,-10,0,0,"orange",20);
-
 	gShipObject = new Object(types.SHIP,300,300,10,-10,0,100,"blue",10);
 
+	for (var i = 0; i < 10; i++)
+	{
+		const img = (i % 2) ? "images/monster.png" : "images/hero.png";
+		NewImageObject(RandomWidth(20), RandomHeight(20), rnd(-50,50), rnd(-50,50), 0, 0, img);
+	}
+
 	setInterval(function() { NewFallingObject(); }, 1500);
+
+	DoExplosions();
 }
 
 /*---------------------------------------------------------------------------*/
