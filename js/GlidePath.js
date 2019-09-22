@@ -30,9 +30,15 @@ const kMaxNumObjects = 256;
 const kRotateSpeed = 7;
 const kThrustSpeed = 500;
 
+const backgroundColor = "rgb(54, 61, 69)";
+const textColor = "rgb(250, 250, 250)";
+const shipColor = "rgb(20, 119, 155)";
+const lineColor = "rgb(124, 209, 12)";
+
 /*---------------------------------------------------------------------------*/
 var gNowMS = Date.now();
 var gObjects = [];
+var gGroundObjects = [];
 let gShipObject = {};
 let gShipAngle = 0;
 let gShipAngleCos = Math.cos(gShipAngle);
@@ -58,6 +64,7 @@ const M_3PI_8 = (3 * M_PI / 8);
 const types = 
 {
     SHIP: 'ship',
+    GROUND: 'ground',
     IMAGE: 'image',
     ICON: 'icon',
     CIRCLE: 'circle',
@@ -95,6 +102,7 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 		{
 			if (!gObjects[i].alive)
 			{
+				// found a dead object - use it
 				gObjects[i] = this;
 				success = true;
 				break;
@@ -210,7 +218,7 @@ var DrawShip = function (obj)
 
 	if (gThrusting)
 	{
-		// draw thrust
+		// draw thrust triangle
 		var thrust = [];
 		thrust.push(new Point(obj.x - kThrustWidth, obj.y + kHalfHeight)); // bottomL
 		thrust.push(new Point(obj.x, obj.y + kHalfHeight + kThrustHeight)); // bottomC
@@ -218,6 +226,16 @@ var DrawShip = function (obj)
 
 		RotateAndDraw(thrust, obj, "red");
 	}
+}
+
+/*---------------------------------------------------------------------------*/
+var DrawCircle = function (x, y, r, color) 
+{
+	ASSERT(r > 0);
+	ctx.beginPath();
+	ctx.fillStyle = color;
+	ctx.arc(x, y, r, 0, M_2PI);
+	ctx.fill();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -230,28 +248,23 @@ Object.prototype.draw = function()
 	}
 	else if (this.type === types.CIRCLE)
 	{
-  		ctx.beginPath();
-  		ctx.fillStyle = this.color;
-  		ctx.arc(this.x, this.y, this.size, 0, M_2PI);
-  		ctx.fill();
+		DrawCircle(this.x, this.y, this.size, this.color);
   	}
   	else if (this.type === types.BULLET)
 	{
-  		ctx.beginPath();
-  		ctx.fillStyle = "red";
-  		ctx.arc(this.x, this.y, 2, 0, M_2PI);
-  		ctx.fill();
+		DrawCircle(this.x, this.y, 2, "red");
+  	}
+  	else if (this.type === types.FRAGMENT)
+	{
+		DrawCircle(this.x, this.y, 2, "white");
   	}
   	else if (this.type === types.SHIP)
   	{
   		DrawShip(this);
   	}
-  	else if (this.type === types.FRAGMENT)
-	{
-  		ctx.beginPath();
-  		ctx.fillStyle = "white";
-  		ctx.arc(this.x, this.y, 2, 0, M_2PI);
-  		ctx.fill();
+  	else if (this.type === types.GROUND)
+  	{
+  		DrawGroundObject(this);
   	}
 };
 
@@ -261,6 +274,14 @@ Object.prototype.updateAliveState = function()
 	const expired = (this.expireTimeMS && this.expireTimeMS < gNowMS);
 	if (expired)
 		this.alive = false;
+
+	if (this.type === types.GROUND)
+	{
+		if ((this.x + this.width) < 0)
+			this.alive = false;
+
+		return;
+	}
 
 	if (this.type !== types.SHIP)
 	{
@@ -382,6 +403,100 @@ var NewImageObject = function(x, y, velX, velY, accX, accY, src)
 }
 
 /*---------------------------------------------------------------------------*/
+var DrawGroundObject = function(obj)
+{
+	// the position of the line segment is defined as its left endpoint
+
+	const rightEndpointX = (obj.x + obj.width);
+	const rightEndpointY = (obj.y + obj.height);
+	
+	ctx.beginPath();
+	ctx.strokeStyle = lineColor;
+	ctx.lineWidth = 4;
+	ctx.moveTo(obj.x, obj.y);
+	ctx.lineTo(rightEndpointX, rightEndpointY);
+	ctx.stroke();
+	
+	// when this line segment's right side hits the right edge, create the next one
+	if (!obj.hasTriggeredNext && rightEndpointX <= canvas.width)
+	{
+		obj.hasTriggeredNext = true;
+		
+		// start the next object - the right endpoint of the current object is
+		// the left endpoint of the new one
+		NewGroundObject(rightEndpointX, rightEndpointY, obj.isBottom, !obj.increasing);
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+Object.prototype.initGround = function(isBottom, increasing) 
+{
+	this.isBottom = isBottom;
+	this.increasing = increasing;
+	this.hasTriggeredNext = false;
+
+	const kGroundMidpoint = 300;
+	
+	// how close are the tight corridors
+	const kMinClosenessMax = 32; //100;
+	const kMinClosenessMin = 16;
+	
+	// how far are the widest parts
+	const kMaxDiffMax = 400;
+	const kMaxDiffMin = 240; //200;
+	
+	let dec = 0;
+	const minCloseness = Math.max((kMinClosenessMax - dec), kMinClosenessMin);
+	const maxDiff = Math.max((kMaxDiffMax - (dec * 8)), kMaxDiffMin);
+	
+	const kUpperLineMin = (kGroundMidpoint + (maxDiff/2));
+	const kUpperLineMax = (kGroundMidpoint + (minCloseness/2));
+	const kLowerLineMin = (kGroundMidpoint - (minCloseness/2));
+	const kLowerLineMax = (kGroundMidpoint - (maxDiff/2));
+	
+	// each ground object is a new line segment
+	// get random values for the width and height of this line segment
+	this.width = rnd(30, 120);
+	let height = rnd(10, 100);
+	
+	// make sure the line segments stay within the above ^^ range
+	// FIXME - these are all constants!!
+	let mRangeMinY = 0;
+	let mRangeMaxY = 0;
+	if (isBottom)
+	{
+		mRangeMinY = (canvas.height - kLowerLineMin);
+		mRangeMaxY = (canvas.height - kLowerLineMax);
+	}
+	else
+	{
+		mRangeMinY = (canvas.height - kUpperLineMin);
+		mRangeMaxY = (canvas.height - kUpperLineMax);
+	}
+	
+	if (increasing && (height > (this.y - mRangeMinY)))
+		height = (this.y - mRangeMinY);
+	else if (!increasing && (height > (mRangeMaxY - this.y)))
+		height = (mRangeMaxY - this.y);
+	
+	// negative height if decreasing
+	this.height = (height * (increasing ? -1.0 : 1.0));
+	return;
+}
+
+/*---------------------------------------------------------------------------*/
+var NewGroundObject = function(x, y, isBottom, increasing)
+{
+	const kGroundSpeedBottom = 120;
+	const kGroundSpeedTop = 140;
+
+	const velX = (isBottom ? -kGroundSpeedBottom : -kGroundSpeedTop);
+	var obj = new Object(types.GROUND, x, y, velX, 0, 0, 0, 0, 0);
+	obj.initGround(isBottom, increasing);
+	gGroundObjects.push(obj);
+}
+
+/*---------------------------------------------------------------------------*/
 var CheckRotation = function (isRotating)
 {
 	if (isRotating)
@@ -482,7 +597,7 @@ var BothOfType = function(obj1, obj2, type)
 /*---------------------------------------------------------------------------*/
 var ExactlyOneOfType = function(obj1, obj2, type)
 {
-	return ((obj1.type === type) ^ (obj2.type === type));
+	return (obj1.type === type ^ obj2.type === type);
 }
 /*---------------------------------------------------------------------------*/
 var Collided = function(obj1, obj2)
@@ -502,12 +617,13 @@ var Collided = function(obj1, obj2)
 	var distance = Math.sqrt(dx * dx + dy * dy);
 	var collided = (distance < (obj1.size + obj2.size);*/
 
+	// to-do: use actual height & width here
 	const w = 6;
 	const h = 6;
-	const collided =  obj1.x <= (obj2.x + h) &&
-					obj2.x <= (obj1.x + h) &&
-					obj1.y <= (obj2.y + w) &&
-					obj2.y <= (obj1.y + w);
+	const collided =  	obj1.x <= (obj2.x + h) &&
+						obj2.x <= (obj1.x + h) &&
+						obj1.y <= (obj2.y + w) &&
+						obj2.y <= (obj1.y + w);
 
 	if (collided)
 	{
@@ -519,8 +635,10 @@ var Collided = function(obj1, obj2)
 }
 
 /*---------------------------------------------------------------------------*/
+// act on each pair of objects exactly once
 var HandleObjectPairInteractions = function()
 {
+	gNumPairChecks = 0;
 	for (var k = 0; k < (gObjects.length - 1); k++)
 	{
 		var o1 = gObjects[k];
@@ -537,6 +655,7 @@ var HandleObjectPairInteractions = function()
 			if (!o2.isActive()) 
 				continue;
 			
+			gNumPairChecks++;
 			if (Collided(o1, o2))
 				Explosion(o1.x, o1.y);
 		}
@@ -547,11 +666,12 @@ var HandleObjectPairInteractions = function()
 var DrawText = function () 
 {
 	  // text in upper left
-  	ctx.fillStyle = "rgb(250, 250, 250)";
+  	ctx.fillStyle = textColor;
 	ctx.font = "16px Helvetica";
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
-	ctx.fillText("# objects: " + gNumActiveObjects + ", " + gObjects.length, 24, canvas.height - 24);
+	ctx.fillText("# objects: " + gNumActiveObjects + ", " + gObjects.length + ", " + gNumPairChecks, 
+			24, canvas.height - 24);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -578,7 +698,7 @@ var AnimateAndDraw = function (delta)
 var ClearCanvas = function (delta) 
 {
 	// fill background (and erase all objects)
-	ctx.fillStyle = "grey";
+	ctx.fillStyle = backgroundColor;
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -596,9 +716,8 @@ var DoSomeWork = function (delta)
 // do some random explosions
 var DoExplosions = function () 
 {
-	const m = 20; // margin
 	for (var i = 0; i < 12; i++)
-		Explosion(rnd(m, canvas.width - m),rnd(m, canvas.height - m));
+		Explosion(RandomWidth(20), RandomHeight(20));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -622,7 +741,10 @@ var RandomHeight = function (margin)
 /*---------------------------------------------------------------------------*/
 var Init = function () 
 {
-	gShipObject = new Object(types.SHIP,300,300,10,-10,0,100,"blue",10);
+	gShipObject = new Object(types.SHIP,300,300,10,-10,0,100,shipColor,10);
+
+	NewGroundObject(canvas.width, canvas.height - 20, true, true);
+	NewGroundObject(canvas.width, canvas.height - 400, false, true);
 
 	for (var i = 0; i < 10; i++)
 	{
@@ -657,10 +779,7 @@ var main = function ()
 } (); 
 
 
-
-//////////////////////////////////////////////////////////////////////////////
-
-
+/*---------------------------------------------------------------------------*/
 // Cross-browser support for requestAnimationFrame
 var w = window;
 requestAnimationFrame = w.requestAnimationFrame || w.webkitRequestAnimationFrame || w.msRequestAnimationFrame || w.mozRequestAnimationFrame;
