@@ -40,6 +40,7 @@ var gNowMS = Date.now();
 var gObjects = [];
 var gGroundObjects = [];
 let gShipObject = {};
+let gShipDistanceFromGround = 0;
 let gShipAngle = 0;
 let gShipAngleCos = Math.cos(gShipAngle);
 let gShipAngleSin = Math.sin(gShipAngle);
@@ -59,6 +60,7 @@ const M_2PI = (2 * M_PI);
 const M_PI_4 = (M_PI / 4);
 const M_PI_8 = (M_PI / 8);
 const M_3PI_8 = (3 * M_PI / 8);
+const INT_MAX = 1000000;
 
 /*---------------------------------------------------------------------------*/
 const types = 
@@ -172,6 +174,7 @@ var RotateAndDraw = function (verts, pos, color)
 	}
 
 	DrawPolygon(rv, color);
+	return rv;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -214,7 +217,7 @@ var DrawShip = function (obj)
 	ship.push(new Point(obj.x + kHalfBaseWidth, obj.y + kHalfHeight)); // bottomR
 	ship.push(new Point(obj.x, obj.y - kHalfHeight));	// top
 
-	RotateAndDraw(ship, obj, ColorForShip());
+	gShipObject.vertices = RotateAndDraw(ship, obj, ColorForShip());
 
 	if (gThrusting)
 	{
@@ -403,28 +406,143 @@ var NewImageObject = function(x, y, velX, velY, accX, accY, src)
 }
 
 /*---------------------------------------------------------------------------*/
+var CheckVerticalBounds = function()
+{
+	for (var i = 0; i < gObjects.length; i++)
+	{
+		let g = gObjects[i];
+		if (g.type === types.GROUND && g.isActive() && IsOutOfVerticalBounds(g, gShipObject))
+			gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+var CalcShipDistanceToGround = function()
+{
+	let distance = INT_MAX;
+	
+	// not very efficient to check every ground line segment - need
+	// a map or something (but this INT_MAX mechanism works fine)
+	for (var i = 0; i < gGroundObjects.length; i++)
+	{
+		if (gGroundObjects[i].isBottom)
+		{
+			const d = CalcDistanceToGround(gGroundObjects[i], gShipObject);
+			if (d < distance)
+				distance = d;
+		}
+	}
+	
+	gShipDistanceFromGround = distance;
+}
+
+/*---------------------------------------------------------------------------*/
+var VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
+{
+	// only check the segment we're in since we're
+	// checking vertical distance
+	if (obj.x < leftX || obj.x > rightX)
+		return INT_MAX;
+	
+	// avoid divide by zero
+	if ((rightX - leftX) == 0)
+		return INT_MAX;
+	
+	// slope
+	const m = ((rightY - leftY) / (rightX - leftX));
+
+	// b = y - mx, since y = mx + b
+	const b = (rightY - (m * rightX));
+	
+	// now that we have the equation of the line, find the y value of the
+	// point on the line with the x-coord of the ship (y = mx + b)
+	const y = ((m * obj.x) + b);
+	
+	// the distance is the vertical line from the ship to the line segment
+	const d = (y - obj.y);
+	return d;
+}
+
+/*---------------------------------------------------------------------------*/
+var CalcDistanceToGround = function (ground, obj)
+{
+	let distance = INT_MAX;
+
+	for (var i = 0; i < obj.vertices.length; i++)
+	{
+		const d = VerticalDistanceToLine(	ground.rightEndpointX, ground.rightEndpointY,
+											ground.x, ground.y,
+											obj.vertices[i]);
+		if (d < distance)
+			distance = d;
+	}
+	
+	return distance;
+}
+
+/*---------------------------------------------------------------------------*/
+var IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
+{
+	return (VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj) < 0);
+}
+
+/*---------------------------------------------------------------------------*/
+var IsAboveLine = function(rightX, rightY, leftX, leftY, obj)
+{
+	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
+	return (d > 0 && d < 1000);
+}
+
+/*---------------------------------------------------------------------------*/
+var IsOutsideLines = function(isBottom, rightX, rightY, leftX, leftY, obj)
+{
+	if (isBottom)
+		return IsUnderLine(rightX, rightY, leftX, leftY, obj);
+	else
+		return IsAboveLine(rightX, rightY, leftX, leftY, obj);
+}
+
+/*---------------------------------------------------------------------------*/
+// 	METHOD:	IsOutOfVerticalBounds
+//  see if any point on the object has collided with the ground or the top line
+/*---------------------------------------------------------------------------*/
+var IsOutOfVerticalBounds = function(ground, obj)
+{	
+	for (var i = 0; i < obj.vertices.length; i++)
+	{
+		if (IsOutsideLines(	ground.isBottom, 
+							ground.rightEndpointX, ground.rightEndpointY, 
+							ground.x, ground.y,
+							obj.vertices[i]))
+			return true;
+	}
+		
+	return false;
+}
+
+/*---------------------------------------------------------------------------*/
 var DrawGroundObject = function(obj)
 {
 	// the position of the line segment is defined as its left endpoint
 
-	const rightEndpointX = (obj.x + obj.width);
-	const rightEndpointY = (obj.y + obj.height);
+	obj.rightEndpointX = (obj.x + obj.width);
+	obj.rightEndpointY = (obj.y + obj.height);
 	
 	ctx.beginPath();
 	ctx.strokeStyle = lineColor;
 	ctx.lineWidth = 4;
 	ctx.moveTo(obj.x, obj.y);
-	ctx.lineTo(rightEndpointX, rightEndpointY);
+	ctx.lineTo(obj.rightEndpointX, obj.rightEndpointY);
 	ctx.stroke();
 	
 	// when this line segment's right side hits the right edge, create the next one
-	if (!obj.hasTriggeredNext && rightEndpointX <= canvas.width)
+	if (!obj.hasTriggeredNext && obj.rightEndpointX <= canvas.width)
 	{
 		obj.hasTriggeredNext = true;
 		
 		// start the next object - the right endpoint of the current object is
 		// the left endpoint of the new one
-		NewGroundObject(rightEndpointX, rightEndpointY, obj.isBottom, !obj.increasing);
+		NewGroundObject(obj.rightEndpointX, obj.rightEndpointY, obj.isBottom, !obj.increasing);
 	}
 }
 
@@ -708,6 +826,8 @@ var DoSomeWork = function (delta)
 	ClearCanvas();
 	GetUserInput(delta);
 	AnimateAndDraw(delta);
+	CheckVerticalBounds();
+	CalcShipDistanceToGround();
   	HandleObjectPairInteractions();
 	DrawText();
 };
