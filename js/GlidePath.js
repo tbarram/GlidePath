@@ -31,10 +31,10 @@ const kRotateSpeed = 7;
 const kThrustSpeed = 500;
 const kGroundMidpoint = 300;
 
-const backgroundColor = "rgb(54, 61, 69)";
-const textColor = "rgb(250, 250, 250)";
-const shipColor = "rgb(20, 119, 155)";
-const lineColor = "rgb(124, 209, 12)";
+const kBackgroundColor = "rgb(54, 61, 69)";
+const kTextColor = "rgb(250, 250, 250)";
+const kShipColor = "rgb(20, 119, 155)";
+const kLineColor = "rgb(124, 209, 12)";
 
 /*---------------------------------------------------------------------------*/
 var gNowMS = Date.now();
@@ -54,6 +54,11 @@ let gNextBlinkMS = 0;
 let gBlink = false;
 let gNumActiveObjects = 0;
 let gLastShootMS = 0;
+let gScore = 0;
+
+let gScoreEventCounter = {};
+let gBestScoreEventCounter = {};
+let gBestAllTimeScoreEventCounter = {};
 
 /*---------------------------------------------------------------------------*/
 const M_PI = Math.PI;
@@ -73,8 +78,26 @@ const types =
     CIRCLE: 'circle',
     VECTOR: 'vector',
     BULLET: 'bullet',
-    FRAGMENT: 'fragment'
+    FRAGMENT: 'fragment',
+    TEXT_BUBBLE: 'text_bubble'
 }
+
+/*---------------------------------------------------------------------------*/
+const scores = 
+{
+	eNullEvent : 'eNullEvent',
+	eStayedLow : 'eStayedLow',
+	eRescuedHostage : 'eRescuedHostage',
+	eRescuedHostage2 : 'eRescuedHostage2',
+	eRescuedHostage3 : 'eRescuedHostage3',
+	eSingleRotate : 'eSingleRotate',
+	eDoubleRotate : 'eDoubleRotate',
+	eTripleRotate : 'eTripleRotate',
+	eQuadrupleRotate : 'eQuadrupleRotate',
+	eSingleRotateWithRescue : 'eSingleRotateWithRescue',
+	eDoubleRotateWithRescue : 'eDoubleRotateWithRescue',
+	eTripleRotateWithRescue : 'eTripleRotateWithRescue'
+};
 
 /*---------------------------------------------------------------------------*/
 function Object(type, x, y, velX, velY, accX, accY, color, size) 
@@ -283,6 +306,10 @@ Object.prototype.draw = function()
   	{
   		DrawGroundObject(this);
   	}
+  	else if (this.type === types.TEXT_BUBBLE)
+  	{
+  		DrawTextObject(this);
+  	}
 };
 
 /*---------------------------------------------------------------------------*/
@@ -347,6 +374,128 @@ Object.prototype.adjustBounds = function()
 		// some horiz friction 
 		this.accX = (this.velX > 0) ? -10 : 10;
 	}
+}
+
+/*---------------------------------------------------------------------------*/
+var NewTextBubble = function(text, pos, color)
+{
+	var obj = new Object(types.TEXT_BUBBLE, pos.x, pos.y, -20, -50, 20, -20, color, 0);
+	obj.text = text;
+	obj.expireTimeMS = (gNowMS + 3000);
+}
+
+/*---------------------------------------------------------------------------*/
+var TextColorForScoreEvent = function(ev)
+{
+	switch (ev)
+	{
+		case scores.eRescuedHostage:
+		case scores.eRescuedHostage2:
+		case scores.eRescuedHostage3:
+			return "white";
+		case scores.eSingleRotate:
+			return "yellow";
+		case scores.eDoubleRotate:
+			return "orange";
+		case scores.eTripleRotate:
+			return "red";
+		case scores.eQuadrupleRotate:
+			return "blue";
+		case scores.eSingleRotateWithRescue:
+		case scores.eDoubleRotateWithRescue:
+		case scores.eTripleRotateWithRescue:
+			return "yellow";
+		case scores.eStayedLow:
+			return "brown"
+		default:
+			return "green"
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+var LabelForScoreEvent = function(ev)
+{
+	switch (ev)
+	{
+		case scores.eRescuedHostage: 			return "Rescued soldiers";
+		case scores.eRescuedHostage2: 			return "Rescued spies";
+		case scores.eRescuedHostage3: 			return "Rescued captains";
+		case scores.eSingleRotate: 				return "Single rotations";
+		case scores.eDoubleRotate: 				return "Double rotations";
+		case scores.eTripleRotate: 				return "Triple rotations";
+		case scores.eQuadrupleRotate:			return "Quadruple rotations";
+		case scores.eSingleRotateWithRescue: 	return "Single rotations with hostage";
+		case scores.eDoubleRotateWithRescue: 	return "Double rotations with hostage";
+		case scores.eTripleRotateWithRescue: 	return "Triple rotations with hostage";
+		case scores.eStayedLow:					return "Stayed low";
+		default: return "";
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+var TextForScoreEvent = function(ev)
+{
+	switch (ev)
+	{
+		case scores.eRescuedHostage: 			return "Rescued soldier";
+		case scores.eRescuedHostage2: 			return "Rescued spy";
+		case scores.eRescuedHostage3: 			return "Rescued captain";
+		case scores.eSingleRotate: 				return "Single rotate";
+		case scores.eDoubleRotate: 				return "Double rotate";
+		case scores.eTripleRotate: 				return "TRIPLE rotate";
+		case scores.eQuadrupleRotate: 			return "QUADRUPLE rotate";
+		case scores.eSingleRotateWithRescue: 	return "Single rotate with rescue";
+		case scores.eDoubleRotateWithRescue: 	return "Double rotate with rescue";
+		case scores.eTripleRotateWithRescue: 	return "TRIPLE rotate with rescue";
+		case scores.eStayedLow:					return "Stayed Low!";
+		default: return "";
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+var ScoreForEvent = function(ev)
+{
+	switch (ev)
+	{
+		case scores.eRescuedHostage: 			return 2000;
+		case scores.eSingleRotate: 				return 500;
+		case scores.eDoubleRotate: 				return 1200;
+		case scores.eTripleRotate: 				return 2000;
+		case scores.eQuadrupleRotate: 			return 5000;
+		case scores.eSingleRotateWithRescue: 	return 4000;
+		case scores.eDoubleRotateWithRescue: 	return 30;
+		case scores.eTripleRotateWithRescue: 	return 50;
+		case scores.eStayedLow:					return 1000;
+		default: return 0;
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+var ScoreEvent = function(ev)
+{
+	// we use isFixed as an "is game active" check
+	// should probably add a new mIsScoringActive var
+	if (gShipObject.isFixed)
+		return;
+	
+	const score = ScoreForEvent(ev);
+	gScore += score;
+	
+	// update the score event counter
+	//gScoreEventCounter[ev]++;
+	
+	let scoreText = ((score > 0 ? "+" : "") + score);
+	
+	// show full text always for now
+	if (true)
+		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")");
+	
+	// if it's the first time then add the !
+	//if (sScoreEventCounter[ev] == 1)
+	//	scoreText += "!";
+	
+	const color = TextColorForScoreEvent(ev);
+	NewTextBubble(scoreText, gShipObject, color);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -521,7 +670,7 @@ var DrawGroundObject = function(obj)
 	obj.rightY = (obj.y + obj.height);
 	
 	ctx.beginPath();
-	ctx.strokeStyle = lineColor;
+	ctx.strokeStyle = kLineColor;
 	ctx.lineWidth = 4;
 	ctx.moveTo(obj.x, obj.y);
 	ctx.lineTo(obj.rightX, obj.rightY);
@@ -606,6 +755,16 @@ var NewGroundObject = function(x, y, isBottom, increasing)
 }
 
 /*---------------------------------------------------------------------------*/
+var DrawTextObject = function(obj)
+{
+	ctx.fillStyle = obj.color;
+	ctx.font = "16px Helvetica";
+	ctx.textAlign = "left";
+	ctx.textBaseline = "bottom";
+	ctx.fillText(obj.text, obj.x, obj.y);
+}
+
+/*---------------------------------------------------------------------------*/
 var CheckRotation = function (isRotating)
 {
 	if (isRotating)
@@ -630,6 +789,14 @@ var CheckRotation = function (isRotating)
 				gNumRotations++;
 				//mShipBlinkColor = (gNumRotations > 1 ? Colours::red : Colours::blue);
 				gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+
+				const ev = 	gNumRotations === 1 ? scores.eSingleRotate :
+							gNumRotations === 2 ? scores.eDoubleRotate :
+							gNumRotations === 3 ? scores.eTripleRotate :
+							gNumRotations === 4 ? scores.eQuadrupleRotate :
+							"";
+
+				ScoreEvent(ev);
 			}
 		}
 	}
@@ -778,8 +945,8 @@ var HandleObjectPairInteractions = function()
 /*---------------------------------------------------------------------------*/
 var DrawText = function () 
 {
-	  // text in upper left
-  	ctx.fillStyle = textColor;
+	// text in lower left
+  	ctx.fillStyle = kTextColor;
 	ctx.font = "16px Helvetica";
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
@@ -815,7 +982,7 @@ var AnimateAndDraw = function (delta)
 var ClearCanvas = function (delta) 
 {
 	// fill background (and erase all objects)
-	ctx.fillStyle = backgroundColor;
+	ctx.fillStyle = kBackgroundColor;
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -859,19 +1026,19 @@ var RandomHeight = function (margin)
 /*---------------------------------------------------------------------------*/
 var Init = function () 
 {
-	gShipObject = new Object(types.SHIP,kGroundMidpoint,kGroundMidpoint,10,-10,0,100,shipColor,10);
+	gShipObject = new Object(types.SHIP,kGroundMidpoint,kGroundMidpoint,10,-10,0,100,kShipColor,10);
 	ResetShip();
 
 	NewGroundObject(canvas.width, canvas.height - 20, true, true);
 	NewGroundObject(canvas.width, canvas.height - 400, false, true);
 
-	for (var i = 0; i < 10; i++)
+	/*for (var i = 0; i < 10; i++)
 	{
 		const img = (i % 2) ? "images/monster.png" : "images/hero.png";
 		NewImageObject(RandomWidth(20), RandomHeight(20), rnd(-50,50), rnd(-50,50), 0, 0, img);
-	}
+	}*/
 
-	setInterval(function() { NewFallingObject(); }, 1500);
+	//setInterval(function() { NewFallingObject(); }, 1500);
 
 	DoExplosions();
 }
