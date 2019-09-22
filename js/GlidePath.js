@@ -12,18 +12,14 @@ document.body.appendChild(canvas);
 function ASSERT(cond, str)
 {
 	if (!cond)
-	{
-		if (str)
-			alert(str);
-	}
+		alert(str | "");
 }
 
 /*---------------------------------------------------------------------------*/
-function rnd(min, max) 
-{
-  	const r = (min + Math.floor(Math.random() * (max - min)));
-  	return r;
-}
+var rnd = function(min, max) { return (min + Math.floor(Math.random() * (max - min))); }
+var RandomColor = function () { return 'rgb(' + rnd(0,255) + ',' + rnd(0,255) + ',' + rnd(0,255) +')'; }
+var RandomWidth = function (margin) { return rnd(margin, canvas.width - margin); }
+var RandomHeight = function (margin) { return rnd(margin, canvas.height - margin); }
 
 /*---------------------------------------------------------------------------*/
 const kMaxNumObjects = 512;
@@ -94,6 +90,7 @@ const scores =
 	eDoubleRotate : 'eDoubleRotate',
 	eTripleRotate : 'eTripleRotate',
 	eQuadrupleRotate : 'eQuadrupleRotate',
+	eQuintupleRotate : 'eQuintupleRotate',
 	eSingleRotateWithRescue : 'eSingleRotateWithRescue',
 	eDoubleRotateWithRescue : 'eDoubleRotateWithRescue',
 	eTripleRotateWithRescue : 'eTripleRotateWithRescue'
@@ -129,7 +126,7 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 		{
 			if (!gObjects[i].alive)
 			{
-				// found a dead object - use it
+				// found a dead object - use its spot
 				gObjects[i] = this;
 				success = true;
 				break;
@@ -137,6 +134,7 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 		}
 
 		// if you hit this assert it means you've exceeded kMaxNumObjects
+		// it's OK to increase it but it will impact performance
 		ASSERT(success, "Exceeded kMaxNumObjects");
 	}
 }
@@ -178,11 +176,9 @@ var DrawPolygon = function (verts, color)
 {
 	ctx.beginPath();
 	ctx.fillStyle = color;
-
 	ctx.moveTo(verts[0].x, verts[0].y);
 	for(var i = 1; i < verts.length; i++)
 		ctx.lineTo(verts[i].x, verts[i].y);
-
 	ctx.closePath();
 	ctx.fill();
 }
@@ -226,7 +222,7 @@ var ColorForShip = function ()
 }
 
 /*---------------------------------------------------------------------------*/
-var ResetShip = function () 
+var ShipReset = function () 
 {
 	Explosion(gShipObject.x, gShipObject.y);
 	gShipObject.isFixed = true;
@@ -234,7 +230,10 @@ var ResetShip = function ()
 	gShipObject.y = 400; // kGroundMidpoint;
 	gShipObject.velX = 0;
 	gShipObject.velY = 0;
+	gShipObject.accX = 0;
+	gShipObject.accY = 100;
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+	gScore = 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -379,7 +378,9 @@ Object.prototype.adjustBounds = function()
 /*---------------------------------------------------------------------------*/
 var NewTextBubble = function(text, pos, color)
 {
-	var obj = new Object(types.TEXT_BUBBLE, pos.x, pos.y, -20, -50, 20, -20, color, 0);
+	const x = pos.x - 0;
+	const y = pos.y - 30;
+	var obj = new Object(types.TEXT_BUBBLE, x, y, -20, -50, 20, -20, color, 0);
 	obj.text = text;
 	obj.expireTimeMS = (gNowMS + 3000);
 }
@@ -401,6 +402,8 @@ var TextColorForScoreEvent = function(ev)
 			return "red";
 		case scores.eQuadrupleRotate:
 			return "blue";
+		case eQuintupleRotate:
+			return "purple";
 		case scores.eSingleRotateWithRescue:
 		case scores.eDoubleRotateWithRescue:
 		case scores.eTripleRotateWithRescue:
@@ -424,6 +427,7 @@ var LabelForScoreEvent = function(ev)
 		case scores.eDoubleRotate: 				return "Double rotations";
 		case scores.eTripleRotate: 				return "Triple rotations";
 		case scores.eQuadrupleRotate:			return "Quadruple rotations";
+		case scores.eQuintupleRotate:			return "Quintuple rotations";
 		case scores.eSingleRotateWithRescue: 	return "Single rotations with hostage";
 		case scores.eDoubleRotateWithRescue: 	return "Double rotations with hostage";
 		case scores.eTripleRotateWithRescue: 	return "Triple rotations with hostage";
@@ -444,6 +448,7 @@ var TextForScoreEvent = function(ev)
 		case scores.eDoubleRotate: 				return "Double rotate";
 		case scores.eTripleRotate: 				return "TRIPLE rotate";
 		case scores.eQuadrupleRotate: 			return "QUADRUPLE rotate";
+		case scores.eQuintupleRotate: 			return "QUINTUPLE rotate";
 		case scores.eSingleRotateWithRescue: 	return "Single rotate with rescue";
 		case scores.eDoubleRotateWithRescue: 	return "Double rotate with rescue";
 		case scores.eTripleRotateWithRescue: 	return "TRIPLE rotate with rescue";
@@ -462,6 +467,7 @@ var ScoreForEvent = function(ev)
 		case scores.eDoubleRotate: 				return 1200;
 		case scores.eTripleRotate: 				return 2000;
 		case scores.eQuadrupleRotate: 			return 5000;
+		case scores.eQuintupleRotate: 			return 12000;
 		case scores.eSingleRotateWithRescue: 	return 4000;
 		case scores.eDoubleRotateWithRescue: 	return 30;
 		case scores.eTripleRotateWithRescue: 	return 50;
@@ -574,6 +580,9 @@ var NewImageObject = function(x, y, velX, velY, accX, accY, src)
 /*---------------------------------------------------------------------------*/
 var CheckVerticalBounds = function()
 {
+	if (gShipObject.isFixed)
+		return;
+
 	// reset each frame
 	gShipDistanceFromGround = INT_MAX;
 
@@ -584,7 +593,7 @@ var CheckVerticalBounds = function()
 			continue;
 
 		if (IsOutOfVerticalBounds(g, gShipObject))
-			ResetShip();
+			ShipReset();
 	}
 }
 
@@ -787,14 +796,14 @@ var CheckRotation = function (isRotating)
 			if (angularChange > nextRotationThreshold)
 			{
 				gNumRotations++;
-				//mShipBlinkColor = (gNumRotations > 1 ? Colours::red : Colours::blue);
+
 				gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 
 				const ev = 	gNumRotations === 1 ? scores.eSingleRotate :
 							gNumRotations === 2 ? scores.eDoubleRotate :
 							gNumRotations === 3 ? scores.eTripleRotate :
 							gNumRotations === 4 ? scores.eQuadrupleRotate :
-							"";
+							scores.eQuintupleRotate;
 
 				ScoreEvent(ev);
 			}
@@ -956,6 +965,13 @@ var DrawText = function ()
 							", " + gObjects.length + 
 							", " + d.toFixed(0), 
 							24, canvas.height - 24);
+
+
+  	ctx.fillStyle = "green";
+	ctx.font = "32px Helvetica";
+	ctx.textAlign = "center";
+	ctx.textBaseline = "bottom";
+	ctx.fillText("SCORE: " + gScore, canvas.width/2, 100);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -987,6 +1003,14 @@ var ClearCanvas = function (delta)
 }
 
 /*---------------------------------------------------------------------------*/
+// do some random explosions
+var DoExplosions = function () 
+{
+	for (var i = 0; i < 12; i++)
+		Explosion(RandomWidth(20), RandomHeight(20));
+}
+
+/*---------------------------------------------------------------------------*/
 var DoSomeWork = function (delta) 
 {
 	ClearCanvas();
@@ -998,36 +1022,10 @@ var DoSomeWork = function (delta)
 };
 
 /*---------------------------------------------------------------------------*/
-// do some random explosions
-var DoExplosions = function () 
-{
-	for (var i = 0; i < 12; i++)
-		Explosion(RandomWidth(20), RandomHeight(20));
-}
-
-/*---------------------------------------------------------------------------*/
-var RandomColor = function () 
-{
-	return 'rgb(' + rnd(0,255) + ',' + rnd(0,255) + ',' + rnd(0,255) +')';
-}
-
-/*---------------------------------------------------------------------------*/
-var RandomWidth = function (margin) 
-{
-	return rnd(margin, canvas.width - margin);
-}
-
-/*---------------------------------------------------------------------------*/
-var RandomHeight = function (margin) 
-{
-	return rnd(margin, canvas.height - margin);
-}
-
-/*---------------------------------------------------------------------------*/
 var Init = function () 
 {
-	gShipObject = new Object(types.SHIP,kGroundMidpoint,kGroundMidpoint,10,-10,0,100,kShipColor,10);
-	ResetShip();
+	gShipObject = new Object(types.SHIP,0,0,0,0,0,0,kShipColor,10);
+	ShipReset();
 
 	NewGroundObject(canvas.width, canvas.height - 20, true, true);
 	NewGroundObject(canvas.width, canvas.height - 400, false, true);
