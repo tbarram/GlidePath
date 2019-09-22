@@ -4,8 +4,8 @@
 // Create the canvas
 var canvas = document.createElement("canvas");
 var ctx = canvas.getContext("2d");
-canvas.width = 512; //1200; //512;
-canvas.height = 600; //680;
+canvas.width = 1200; //512;
+canvas.height = 680; //680;
 document.body.appendChild(canvas);
 
 /*---------------------------------------------------------------------------*/
@@ -26,9 +26,10 @@ function rnd(min, max)
 }
 
 /*---------------------------------------------------------------------------*/
-const kMaxNumObjects = 256;
+const kMaxNumObjects = 512;
 const kRotateSpeed = 7;
 const kThrustSpeed = 500;
+const kGroundMidpoint = 300;
 
 const backgroundColor = "rgb(54, 61, 69)";
 const textColor = "rgb(250, 250, 250)";
@@ -89,6 +90,7 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 	this.size = size;
 	this.ready = true;
 	this.alive = true;
+	this.isFixed = false;
 
 	// add this object to the gObjects array
 	if (gObjects.length < kMaxNumObjects)
@@ -201,6 +203,18 @@ var ColorForShip = function ()
 }
 
 /*---------------------------------------------------------------------------*/
+var ResetShip = function () 
+{
+	Explosion(gShipObject.x, gShipObject.y);
+	gShipObject.isFixed = true;
+	gShipObject.x = (canvas.width / 2);
+	gShipObject.y = 400; // kGroundMidpoint;
+	gShipObject.velX = 0;
+	gShipObject.velY = 0;
+	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+}
+
+/*---------------------------------------------------------------------------*/
 var DrawShip = function (obj) 
 {
 	const kBaseWidth = 16;
@@ -299,6 +313,9 @@ Object.prototype.updateAliveState = function()
 /*---------------------------------------------------------------------------*/
 Object.prototype.animate = function(delta) 
 {
+	if (this.isFixed)
+		return;
+
 	// apply acceleration to velocity
 	this.velX += (this.accX * delta);
 	this.velY += (this.accY * delta);
@@ -408,32 +425,18 @@ var NewImageObject = function(x, y, velX, velY, accX, accY, src)
 /*---------------------------------------------------------------------------*/
 var CheckVerticalBounds = function()
 {
+	// reset each frame
+	gShipDistanceFromGround = INT_MAX;
+
 	for (var i = 0; i < gObjects.length; i++)
 	{
 		let g = gObjects[i];
-		if (g.type === types.GROUND && g.isActive() && IsOutOfVerticalBounds(g, gShipObject))
-			gShipBlinkEndMS_RotateMS = (gNowMS + 800);
-	}
-}
+		if (g.type !== types.GROUND || !g.isActive())
+			continue;
 
-/*---------------------------------------------------------------------------*/
-var CalcShipDistanceToGround = function()
-{
-	let distance = INT_MAX;
-	
-	// not very efficient to check every ground line segment - need
-	// a map or something (but this INT_MAX mechanism works fine)
-	for (var i = 0; i < gGroundObjects.length; i++)
-	{
-		if (gGroundObjects[i].isBottom)
-		{
-			const d = CalcDistanceToGround(gGroundObjects[i], gShipObject);
-			if (d < distance)
-				distance = d;
-		}
+		if (IsOutOfVerticalBounds(g, gShipObject))
+			ResetShip();
 	}
-	
-	gShipDistanceFromGround = distance;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -464,26 +467,15 @@ var VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 }
 
 /*---------------------------------------------------------------------------*/
-var CalcDistanceToGround = function (ground, obj)
-{
-	let distance = INT_MAX;
-
-	for (var i = 0; i < obj.vertices.length; i++)
-	{
-		const d = VerticalDistanceToLine(	ground.rightEndpointX, ground.rightEndpointY,
-											ground.x, ground.y,
-											obj.vertices[i]);
-		if (d < distance)
-			distance = d;
-	}
-	
-	return distance;
-}
-
-/*---------------------------------------------------------------------------*/
 var IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
-{
-	return (VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj) < 0);
+{ 
+	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
+
+	// since we only ever call this with the SHIP object, we can set this here
+	if (d > 0 && d < 1000)
+		gShipDistanceFromGround = Math.min(d, gShipDistanceFromGround);
+
+	return (d < 0);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -511,7 +503,7 @@ var IsOutOfVerticalBounds = function(ground, obj)
 	for (var i = 0; i < obj.vertices.length; i++)
 	{
 		if (IsOutsideLines(	ground.isBottom, 
-							ground.rightEndpointX, ground.rightEndpointY, 
+							ground.rightX, ground.rightY, 
 							ground.x, ground.y,
 							obj.vertices[i]))
 			return true;
@@ -525,24 +517,24 @@ var DrawGroundObject = function(obj)
 {
 	// the position of the line segment is defined as its left endpoint
 
-	obj.rightEndpointX = (obj.x + obj.width);
-	obj.rightEndpointY = (obj.y + obj.height);
+	obj.rightX = (obj.x + obj.width);
+	obj.rightY = (obj.y + obj.height);
 	
 	ctx.beginPath();
 	ctx.strokeStyle = lineColor;
 	ctx.lineWidth = 4;
 	ctx.moveTo(obj.x, obj.y);
-	ctx.lineTo(obj.rightEndpointX, obj.rightEndpointY);
+	ctx.lineTo(obj.rightX, obj.rightY);
 	ctx.stroke();
 	
 	// when this line segment's right side hits the right edge, create the next one
-	if (!obj.hasTriggeredNext && obj.rightEndpointX <= canvas.width)
+	if (!obj.hasTriggeredNext && obj.rightX <= canvas.width)
 	{
 		obj.hasTriggeredNext = true;
 		
 		// start the next object - the right endpoint of the current object is
 		// the left endpoint of the new one
-		NewGroundObject(obj.rightEndpointX, obj.rightEndpointY, obj.isBottom, !obj.increasing);
+		NewGroundObject(obj.rightX, obj.rightY, obj.isBottom, !obj.increasing);
 	}
 }
 
@@ -553,8 +545,6 @@ Object.prototype.initGround = function(isBottom, increasing)
 	this.increasing = increasing;
 	this.hasTriggeredNext = false;
 
-	const kGroundMidpoint = 300;
-	
 	// how close are the tight corridors
 	const kMinClosenessMax = 32; //100;
 	const kMinClosenessMin = 16;
@@ -575,30 +565,31 @@ Object.prototype.initGround = function(isBottom, increasing)
 	// each ground object is a new line segment
 	// get random values for the width and height of this line segment
 	this.width = rnd(30, 120);
-	let height = rnd(10, 100);
+	this.height = rnd(10, 100);
 	
 	// make sure the line segments stay within the above ^^ range
 	// FIXME - these are all constants!!
-	let mRangeMinY = 0;
-	let mRangeMaxY = 0;
+	let minY = 0;
+	let maxY = 0;
 	if (isBottom)
 	{
-		mRangeMinY = (canvas.height - kLowerLineMin);
-		mRangeMaxY = (canvas.height - kLowerLineMax);
+		minY = (canvas.height - kLowerLineMin);
+		maxY = (canvas.height - kLowerLineMax);
 	}
 	else
 	{
-		mRangeMinY = (canvas.height - kUpperLineMin);
-		mRangeMaxY = (canvas.height - kUpperLineMax);
+		minY = (canvas.height - kUpperLineMin);
+		maxY = (canvas.height - kUpperLineMax);
 	}
 	
-	if (increasing && (height > (this.y - mRangeMinY)))
-		height = (this.y - mRangeMinY);
-	else if (!increasing && (height > (mRangeMaxY - this.y)))
-		height = (mRangeMaxY - this.y);
+	if (increasing && (this.height > (this.y - minY)))
+		this.height = (this.y - minY);
+	else if (!increasing && (this.height > (maxY - this.y)))
+		this.height = (maxY - this.y);
 	
 	// negative height if decreasing
-	this.height = (height * (increasing ? -1.0 : 1.0));
+	if (increasing)
+		this.height *= -1.0;
 	return;
 }
 
@@ -666,6 +657,7 @@ var GetUserInput = function (delta)
 	{ 	
 		// 'z'
 		gThrusting = true;
+		gShipObject.isFixed = false;
 		gShipObject.velY -= (gShipAngleCos * kThrustSpeed * delta); // vertical thrust
 		gShipObject.velX += (gShipAngleSin * kThrustSpeed * delta); // horiz thrust
 	}
@@ -730,6 +722,9 @@ var Collided = function(obj1, obj2)
 	if (EitherOfType(obj1, obj2, types.FRAGMENT))
 		return false;
 
+	if (EitherOfType(obj1, obj2, types.GROUND))
+		return false;
+
 	/*var dx = obj1.x - obj2.x;
 	var dy = obj1.y - obj2.y;
 	var distance = Math.sqrt(dx * dx + dy * dy);
@@ -788,8 +783,12 @@ var DrawText = function ()
 	ctx.font = "16px Helvetica";
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
-	ctx.fillText("# objects: " + gNumActiveObjects + ", " + gObjects.length + ", " + gNumPairChecks, 
-			24, canvas.height - 24);
+
+	const d = gShipDistanceFromGround === INT_MAX ? 0 : gShipDistanceFromGround;
+	ctx.fillText("# objects: " + gNumActiveObjects + 
+							", " + gObjects.length + 
+							", " + d.toFixed(0), 
+							24, canvas.height - 24);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -827,7 +826,6 @@ var DoSomeWork = function (delta)
 	GetUserInput(delta);
 	AnimateAndDraw(delta);
 	CheckVerticalBounds();
-	CalcShipDistanceToGround();
   	HandleObjectPairInteractions();
 	DrawText();
 };
@@ -861,7 +859,8 @@ var RandomHeight = function (margin)
 /*---------------------------------------------------------------------------*/
 var Init = function () 
 {
-	gShipObject = new Object(types.SHIP,300,300,10,-10,0,100,shipColor,10);
+	gShipObject = new Object(types.SHIP,kGroundMidpoint,kGroundMidpoint,10,-10,0,100,shipColor,10);
+	ResetShip();
 
 	NewGroundObject(canvas.width, canvas.height - 20, true, true);
 	NewGroundObject(canvas.width, canvas.height - 400, false, true);
