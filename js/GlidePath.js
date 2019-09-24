@@ -12,26 +12,40 @@ document.body.appendChild(canvas);
 function ASSERT(cond, str)
 {
 	if (!cond)
-		alert(str | "");
+		alert(str | "assert");
 }
 
 /*---------------------------------------------------------------------------*/
+// utilities
 let rnd = function(min, max) { return (min + Math.floor(Math.random() * (max - min))); }
-let RandomColor = function () { return 'rgb(' + rnd(0,255) + ',' + rnd(0,255) + ',' + rnd(0,255) +')'; }
-let RandomWidth = function (margin) { return rnd(margin, canvas.width - margin); }
-let RandomHeight = function (margin) { return rnd(margin, canvas.height - margin); }
+let RandomWidth = function (m) { return rnd(m, canvas.width - m); }
+let RandomHeight = function (m) { return rnd(m, canvas.height - m); }
+let RGB = function(r, g ,b) { return 'rgb(' + r + ',' + g + ',' + b +')'; }
+let RandomColor = function() { return RGB(rnd(0,255), rnd(0,255), rnd(0,255)); }
+
+/*---------------------------------------------------------------------------*/
+function Point(x, y) { this.x = x; this.y = y; }
 
 /*---------------------------------------------------------------------------*/
 const kMaxNumObjects = 256;
 const kRotateSpeed = 7;
 const kThrustSpeed = 500;
 const kGroundMidpoint = 300;
-const kDistanceGameScoreCutoff = 48;
+const kDistanceGameScoreCutoff = 32;
 
-const kBackgroundColor = "rgb(54, 61, 69)";
-const kTextColor = "rgb(250, 250, 250)";
-const kShipColor = "rgb(20, 119, 155)";
-const kLineColor = "rgb(124, 209, 12)";
+/*---------------------------------------------------------------------------*/
+const kBackgroundColor = RGB(54,61,69);
+const kTextColor = RGB(250,250,250); 
+const kShipColor = RGB(20,119,155); 
+const kLineColor = RGB(124,209,12); 
+
+/*---------------------------------------------------------------------------*/
+const M_PI = Math.PI;
+const M_2PI = (2 * M_PI);
+const M_PI_4 = (M_PI / 4);
+const M_PI_8 = (M_PI / 8);
+const M_3PI_8 = (3 * M_PI / 8);
+const INT_MAX = 1000000;
 
 /*---------------------------------------------------------------------------*/
 let gNowMS = Date.now();
@@ -52,49 +66,42 @@ let gBlink = false;
 let gNumActiveObjects = 0;
 let gLastShootMS = 0;
 let gScore = 0;
-
 let gScoreEventCounter = {};
 let gBestScoreEventCounter = {};
 let gBestAllTimeScoreEventCounter = {};
-
-/*---------------------------------------------------------------------------*/
-const M_PI = Math.PI;
-const M_2PI = (2 * M_PI);
-const M_PI_4 = (M_PI / 4);
-const M_PI_8 = (M_PI / 8);
-const M_3PI_8 = (3 * M_PI / 8);
-const INT_MAX = 1000000;
+let gPointsByKeepingLowIndex = 1;
+let gPointsByKeepingLow = 0;
 
 /*---------------------------------------------------------------------------*/
 const types = 
 {
-    SHIP: 'ship',
-    GROUND: 'ground',
-    IMAGE: 'image',
-    ICON: 'icon',
-    CIRCLE: 'circle',
-    VECTOR: 'vector',
-    BULLET: 'bullet',
-    FRAGMENT: 'fragment',
-    TEXT_BUBBLE: 'text_bubble'
+    SHIP: 			'ship',
+    GROUND: 		'ground',
+    IMAGE: 			'image',
+    ICON: 			'icon',
+    CIRCLE: 		'circle',
+    VECTOR: 		'vector',
+    BULLET: 		'bullet',
+    FRAGMENT: 		'fragment',
+    TEXT_BUBBLE: 	'text_bubble'
 }
 
 /*---------------------------------------------------------------------------*/
 const scores = 
 {
-	eNullEvent : 'eNullEvent',
-	eStayedLow : 'eStayedLow',
-	eRescuedHostage : 'eRescuedHostage',
-	eRescuedHostage2 : 'eRescuedHostage2',
-	eRescuedHostage3 : 'eRescuedHostage3',
-	eSingleRotate : 'eSingleRotate',
-	eDoubleRotate : 'eDoubleRotate',
-	eTripleRotate : 'eTripleRotate',
-	eQuadrupleRotate : 'eQuadrupleRotate',
-	eQuintupleRotate : 'eQuintupleRotate',
-	eSingleRotateWithRescue : 'eSingleRotateWithRescue',
-	eDoubleRotateWithRescue : 'eDoubleRotateWithRescue',
-	eTripleRotateWithRescue : 'eTripleRotateWithRescue'
+	eNullEvent : 				'eNullEvent',
+	eStayedLow : 				'eStayedLow',
+	eRescuedHostage : 			'eRescuedHostage',
+	eRescuedHostage2 : 			'eRescuedHostage2',
+	eRescuedHostage3 : 			'eRescuedHostage3',
+	eSingleRotate : 			'eSingleRotate',
+	eDoubleRotate : 			'eDoubleRotate',
+	eTripleRotate : 			'eTripleRotate',
+	eQuadrupleRotate : 			'eQuadrupleRotate',
+	eQuintupleRotate : 			'eQuintupleRotate',
+	eSingleRotateWithRescue : 	'eSingleRotateWithRescue',
+	eDoubleRotateWithRescue : 	'eDoubleRotateWithRescue',
+	eTripleRotateWithRescue : 	'eTripleRotateWithRescue'
 };
 
 /*---------------------------------------------------------------------------*/
@@ -120,31 +127,29 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 	}
 	else
 	{
-		// once gObjects has filled up, look for unused spots - this
+		// once gObjects has filled up, look for an unused slot - this
 		// keeps the gObjects array from growing indefinitely
-		let success = false;
+		let foundOpenSlot = false;
 		for(let i = 0; i < gObjects.length; i++) 
 		{
 			if (!gObjects[i].alive)
 			{
-				// found a dead object - use its spot
+				// found a free slot
 				gObjects[i] = this;
-				success = true;
+				foundOpenSlot = true;
 				break;
 			}
 		}
 
 		// if you hit this assert it means you've exceeded kMaxNumObjects
 		// it's OK to increase it but it will impact performance
-		ASSERT(success, "Exceeded kMaxNumObjects");
+		ASSERT(foundOpenSlot, "Exceeded kMaxNumObjects");
 	}
 }
 
 /*---------------------------------------------------------------------------*/
-function Point(x, y) { this.x = x; this.y = y; }
-
-/*---------------------------------------------------------------------------*/
 Object.prototype.isActive = function() { return (this.ready && this.alive); }
+Object.prototype.setLifetime = function(ms) { this.expireTimeMS = (gNowMS + ms); }
 
 /*---------------------------------------------------------------------------*/
 // rotate point p around center point c
@@ -189,7 +194,8 @@ let RotateAndDraw = function (verts, pos, color)
 	}
 
 	DrawPolygon(rv, color);
-	return rv;
+
+	return rv; 	// return rotated vertices
 }
 
 /*---------------------------------------------------------------------------*/
@@ -199,7 +205,8 @@ let ColorForShip = function ()
 	const kBlinkSpeedMS = 100;
 
 	// handle blinking
-	if (gShipBlinkEndMS_RotateMS > gNowMS)
+	if (gShipBlinkEndMS_RotateMS > gNowMS || 
+		gShipDistanceFromGround < kDistanceGameScoreCutoff)
 	{
 		if (gNextBlinkMS === 0 || (gNextBlinkMS < gNowMS))
 		{
@@ -228,6 +235,8 @@ let ShipReset = function ()
 	gShipObject.accY = 100;
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gScore = 0;
+	gPointsByKeepingLowIndex = 1;
+	gPointsByKeepingLow = 0;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -285,7 +294,7 @@ Object.prototype.draw = function()
   	}
   	else if (this.type === types.BULLET)
 	{
-		DrawCircle(this.x, this.y, 2, "red");
+		DrawCircle(this.x, this.y, 3, "red");
   	}
   	else if (this.type === types.FRAGMENT)
 	{
@@ -308,18 +317,24 @@ Object.prototype.draw = function()
 /*---------------------------------------------------------------------------*/
 Object.prototype.updateAliveState = function() 
 {
+	// check expireTimeMS
 	const expired = (this.expireTimeMS && this.expireTimeMS < gNowMS);
 	if (expired)
+	{
 		this.alive = false;
+		return;
+	}
 
+	// ground objects die when their right endpoint hits the left edge
 	if (this.type === types.GROUND)
 	{
-		if ((this.x + this.width) < 0)
+		if (this.rightX < 0)
 			this.alive = false;
 
 		return;
 	}
 
+	// objects die when they go off the right or left side of the screen
 	if (this.type !== types.SHIP)
 	{
 		if (this.x < 0 || this.x > canvas.width)
@@ -331,7 +346,7 @@ Object.prototype.updateAliveState = function()
 }
 
 /*---------------------------------------------------------------------------*/
-Object.prototype.animate = function(delta) 
+Object.prototype.updatePosition = function(delta) 
 {
 	if (this.isFixed)
 		return;
@@ -376,7 +391,7 @@ let NewTextBubble = function(text, pos, color)
 	const y = pos.y - 30;
 	let obj = new Object(types.TEXT_BUBBLE, x, y, -20, -50, 20, -20, color, 0);
 	obj.text = text;
-	obj.expireTimeMS = (gNowMS + 3000);
+	obj.setLifetime(3000);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -403,7 +418,7 @@ let TextColorForScoreEvent = function(ev)
 		case scores.eTripleRotateWithRescue:
 			return "yellow";
 		case scores.eStayedLow:
-			return "brown"
+			return "white"
 		default:
 			return "green"
 	}
@@ -498,21 +513,6 @@ let ScoreEvent = function(ev)
 	NewTextBubble(scoreText, gShipObject, color);
 }
 
-let gPointsByKeepingLowIndex = 0;
-/*---------------------------------------------------------------------------*/
-let UpdateStayLowScore = function()
-{
-	// not working yet
-	return;
-	/*const s = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
-	lastStayLowScore = 
-	if (s > 0)
-	{
-		const nextTextBubblePoints = (gPointsByKeepingLowIndex++ * 1000);
-		ScoreEvent(scores.eStayedLow);
-	}*/
-}
-
 /*---------------------------------------------------------------------------*/
 let Velocity = function(speed, angle)
 {
@@ -527,15 +527,15 @@ let ShootBullet = function(x, y)
 
 	let v = Velocity(kBulletSpeed, gShipAngle);
 	let bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.expireTimeMS = gNowMS + 4000;
+	bullet.setLifetime(4000);
 
 	v = Velocity(kBulletSpeed, gShipAngle + kOffset);
 	bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.expireTimeMS = gNowMS + 4000;
+	bullet.setLifetime(4000);
 
 	v = Velocity(kBulletSpeed, gShipAngle - kOffset);
 	bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.expireTimeMS = gNowMS + 4000;
+	bullet.setLifetime(4000);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -549,26 +549,27 @@ let Explosion = function(x, y)
 		// give each frag a random speed
 		const speed = rnd(60, 180);
 		
-		// send each of the fragments at an angle equally spaced around the unit
-		// circle, with some randomness
+		// send each of the fragments at an angle equally spaced around 
+		// the unit circle, with some randomness
 		const angleRnd = rnd(-M_PI_8, M_PI_8);
 		const v = Velocity(speed, (j * kAngleInc) + angleRnd);
 		
 		// give each frag a random x/y acceleration
 		const accX = rnd(0, kNumFrags); // minimal friction
-		const accY = rnd(0, kNumFrags) * 10; // some gravity
+		const accY = rnd(0, kNumFrags) * 16; // some gravity
 		
 		let obj = new Object(types.FRAGMENT, x, y, v.x, v.y, accX, accY, 0, 0);
-		obj.expireTimeMS = gNowMS + rnd(1000, 4000);
+		obj.setLifetime(rnd(1000, 4000));
 	}
 }
 
 /*---------------------------------------------------------------------------*/
 let NewFallingObject = function()
 {
-	const x = RandomWidth(10); // random horiz start
-	const accelY = rnd(40, 160);
-	new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), rnd(8,20));
+	const x = RandomWidth(10); 		// random horiz start
+	const accelY = rnd(40, 160);	// random vertical (falling) acceleration
+	const size = rnd(8,20);			// random size for the circle
+	new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), size);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -587,7 +588,24 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src)
 }
 
 /*---------------------------------------------------------------------------*/
-let CheckShipOutOfBounds = function()
+let DoGame = function()
+{
+	const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
+	if (d > 0)
+	{
+		const nextTextBubblePoints = (gPointsByKeepingLowIndex * 1000);
+		
+		gPointsByKeepingLow += d;
+		if (gPointsByKeepingLow > nextTextBubblePoints)
+		{
+			gPointsByKeepingLowIndex++;
+			ScoreEvent(scores.eStayedLow);
+		}
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+let CheckShipWithinLines = function()
 {
 	if (gShipObject.isFixed)
 		return;
@@ -595,13 +613,15 @@ let CheckShipOutOfBounds = function()
 	// reset each frame
 	gShipDistanceFromGround = INT_MAX;
 
+	// go through all the ground objects and check the ship for each
+	// TODO: create separate array for ground objects?
 	for (let i = 0; i < gObjects.length; i++)
 	{
 		let g = gObjects[i];
 		if (g.type !== types.GROUND || !g.isActive())
 			continue;
 
-		if (IsShipOutOfVerticalBounds(g))
+		if (CheckShipWithSingleGroundObject(g))
 			ShipReset();
 	}
 }
@@ -610,6 +630,7 @@ let CheckShipOutOfBounds = function()
 let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 {
 	// only check the segment we're in since we're checking vertical distance
+	// TODO: can we optimize this so we don't have to iterate over all ground objects?
 	if (obj.x < leftX || obj.x > rightX)
 		return INT_MAX;
 	
@@ -638,7 +659,7 @@ let IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
 	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
 
 	// since we only ever call this with the SHIP object, we can set this here
-	if (d > 0 && d < 1000)
+	if (d > 0 && d < INT_MAX)
 		gShipDistanceFromGround = Math.min(d, gShipDistanceFromGround);
 
 	return (d < 0);
@@ -648,11 +669,11 @@ let IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
 let IsAboveLine = function(rightX, rightY, leftX, leftY, obj)
 {
 	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
-	return (d > 0 && d < 1000);
+	return (d > 0 && d < INT_MAX);
 }
 
 /*---------------------------------------------------------------------------*/
-let IsOutsideLines = function(isBottom, rightX, rightY, leftX, leftY, obj)
+let IsOutsideLine = function(isBottom, rightX, rightY, leftX, leftY, obj)
 {
 	if (isBottom)
 		return IsUnderLine(rightX, rightY, leftX, leftY, obj);
@@ -661,17 +682,18 @@ let IsOutsideLines = function(isBottom, rightX, rightY, leftX, leftY, obj)
 }
 
 /*---------------------------------------------------------------------------*/
-// 	METHOD:	IsShipOutOfVerticalBounds
+// 	METHOD:	CheckShipWithSingleGroundObject
 //  see if we've gone below the lower line or above the upper line
+//  this checks a single ground object (i.e. a single line segment)
 /*---------------------------------------------------------------------------*/
-let IsShipOutOfVerticalBounds = function(ground)
+let CheckShipWithSingleGroundObject = function(g)
 {	
 	// check each pt of the ship
 	for (let i = 0; i < gShipObject.vertices.length; i++)
 	{
-		if (IsOutsideLines(	ground.isBottom, 
-							ground.rightX, ground.rightY, 
-							ground.x, ground.y,
+		if (IsOutsideLine(	g.isBottom, 
+							g.rightX, g.rightY, 
+							g.x, g.y,
 							gShipObject.vertices[i]))
 			return true;
 	}
@@ -684,7 +706,8 @@ let DrawGroundObject = function(obj)
 {
 	// the position of the line segment is defined as its left endpoint
 
-	obj.rightX = (obj.x + obj.width);
+	// calc the right endpoint of the line segment
+	obj.rightX = (obj.x + obj.width); 	
 	obj.rightY = (obj.y + obj.height);
 	
 	ctx.beginPath();
@@ -695,7 +718,8 @@ let DrawGroundObject = function(obj)
 	ctx.stroke();
 	
 	// when this line segment's right side hits the right edge, create the next one
-	if (!obj.hasTriggeredNext && obj.rightX <= canvas.width)
+	// TODO: this should be moved outside of this Draw() method
+	if (!obj.hasTriggeredNext && (obj.rightX <= canvas.width))
 	{
 		obj.hasTriggeredNext = true;
 		
@@ -736,28 +760,15 @@ Object.prototype.initGround = function(isBottom, increasing)
 	
 	// make sure the line segments stay within the above ^^ range
 	// FIXME - these are all constants!!
-	let minY = 0;
-	let maxY = 0;
-	if (isBottom)
-	{
-		minY = (canvas.height - kLowerLineMin);
-		maxY = (canvas.height - kLowerLineMax);
-	}
-	else
-	{
-		minY = (canvas.height - kUpperLineMin);
-		maxY = (canvas.height - kUpperLineMax);
-	}
+	const minY = isBottom ? (canvas.height - kLowerLineMin) : (canvas.height - kUpperLineMin);
+	const maxY = isBottom ? (canvas.height - kLowerLineMax) : (canvas.height - kUpperLineMax);
 	
-	if (increasing && (this.height > (this.y - minY)))
-		this.height = (this.y - minY);
-	else if (!increasing && (this.height > (maxY - this.y)))
-		this.height = (maxY - this.y);
+	const boundY = increasing ? (this.y - minY) : (maxY - this.y);
+	this.height = Math.min(this.height, boundY);
 	
 	// negative height if decreasing
 	if (increasing)
 		this.height *= -1.0;
-	return;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -783,6 +794,22 @@ let DrawTextObject = function(obj)
 }
 
 /*---------------------------------------------------------------------------*/
+let Rotation = function (numRotations)
+{
+	let ev = 0;
+	switch (numRotations)
+	{
+		case 1:  ev = scores.eSingleRotate; 	break;
+		case 2:  ev = scores.eDoubleRotate; 	break;
+		case 3:  ev = scores.eTripleRotate; 	break;
+		case 4:  ev = scores.eQuadrupleRotate; 	break;
+		default: ev = scores.eQuintupleRotate;
+	}
+
+	ScoreEvent(ev);
+}
+
+/*---------------------------------------------------------------------------*/
 let CheckRotation = function (isRotating)
 {
 	if (isRotating)
@@ -795,26 +822,18 @@ let CheckRotation = function (isRotating)
 		else
 		{
 			// the ship is continuing its rotation - calc the angular change (in radians)
-			let angularChange = Math.abs(gAngleStart - gShipAngle);
+			const angularChange = Math.abs(gAngleStart - gShipAngle);
 			
 			// calc the threshold for the next rotation
 			// it's slightly less (3pi/8) than a full rotation to make it a little easier
-			let nextRotationThreshold = (((gNumRotations + 1) * M_2PI) - M_3PI_8);
+			const nextRotationThreshold = (((gNumRotations + 1) * M_2PI) - M_3PI_8);
 			
 			// see if we have crossed the threshold
 			if (angularChange > nextRotationThreshold)
 			{
 				gNumRotations++;
-
 				gShipBlinkEndMS_RotateMS = (gNowMS + 800);
-
-				const ev = 	gNumRotations === 1 ? scores.eSingleRotate :
-							gNumRotations === 2 ? scores.eDoubleRotate :
-							gNumRotations === 3 ? scores.eTripleRotate :
-							gNumRotations === 4 ? scores.eQuadrupleRotate :
-							scores.eQuintupleRotate;
-
-				ScoreEvent(ev);
+				Rotation(gNumRotations);
 			}
 		}
 	}
@@ -827,7 +846,6 @@ let CheckRotation = function (isRotating)
 	gWasRotating = isRotating;
 }
 
-
 /*---------------------------------------------------------------------------*/
 // keyboard input
 let gKeysDown = {};
@@ -838,18 +856,19 @@ addEventListener("keyup"  , function (e) { delete gKeysDown[e.keyCode]; }, false
 let GetUserInput = function (delta) 
 {
 	gThrusting = false;
-	if (90 in gKeysDown) 
+	if (90 in gKeysDown) // 'z'
 	{ 	
-		// 'z'
 		gThrusting = true;
 		gShipObject.isFixed = false;
+
+		// apply thrust to velocity
 		gShipObject.velY -= (gShipAngleCos * kThrustSpeed * delta); // vertical thrust
 		gShipObject.velX += (gShipAngleSin * kThrustSpeed * delta); // horiz thrust
 	}
 
 	if (88 in gKeysDown) 
 	{
-		if (gNowMS - gLastShootMS > 200)
+		if (gNowMS - gLastShootMS > 50)
 		{
 			gLastShootMS = gNowMS;
 			ShootBullet(gShipObject.x, gShipObject.y);
@@ -898,10 +917,8 @@ let Collided = function(o1, o2)
 	if (EitherOfType(o1, o2, types.GROUND))
 		return false;
 
-	/*let dx = o1.x - o2.x;
-	let dy = o1.y - o2.y;
-	let distance = Math.sqrt(dx * dx + dy * dy);
-	let collided = (distance < (o1.size + o2.size);*/
+	if (EitherOfType(o1, o2, types.TEXT_BUBBLE))
+		return false;
 
 	// to-do: use actual height & width here
 	const w = 6;
@@ -970,7 +987,7 @@ let DrawText = function ()
 /*---------------------------------------------------------------------------*/
 let AnimateAndDraw = function (delta) 
 {
-	// animate & draw all the objects
+	// animate & draw all the objects in the gObjects array
 
 	gNumActiveObjects = 0;
   	for(let i = 0; i < gObjects.length; i++) 
@@ -978,7 +995,7 @@ let AnimateAndDraw = function (delta)
   		let obj = gObjects[i];
     	if(obj.isActive()) 
     	{
-      		obj.animate(delta);
+      		obj.updatePosition(delta);
       		obj.adjustBounds();
       		obj.updateAliveState();
       		obj.draw();
@@ -1009,9 +1026,9 @@ let DoSomeWork = function (delta)
 	ClearCanvas();
 	GetUserInput(delta);
 	AnimateAndDraw(delta);
-	CheckShipOutOfBounds();
+	CheckShipWithinLines();
+	DoGame();
   	HandleObjectPairInteractions();
-  	UpdateStayLowScore();
 	DrawText();
 };
 
@@ -1024,13 +1041,7 @@ let Init = function ()
 	NewGroundObject(canvas.width, canvas.height - 20, true, true);
 	NewGroundObject(canvas.width, canvas.height - 400, false, true);
 
-	/*for (let i = 0; i < 10; i++)
-	{
-		const img = (i % 2) ? "images/monster.png" : "images/hero.png";
-		NewImageObject(RandomWidth(20), RandomHeight(20), rnd(-50,50), rnd(-50,50), 0, 0, img);
-	}*/
-
-	//setInterval(function() { NewFallingObject(); }, 1500);
+	setInterval(function(){ NewFallingObject(); }, 1000);
 
 	DoExplosions();
 }
@@ -1044,8 +1055,7 @@ let EventLoop = function ()
 
 	DoSomeWork(delta / 1000);
 	
-	// schedule us again immediately - 
-	// this keeps the framerate as high as possible
+	// schedule us again immediately - this keeps the framerate high
 	requestAnimationFrame(EventLoop);
 };
 
