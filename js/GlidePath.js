@@ -54,8 +54,6 @@ let gGroundObjects = [];
 let gShipObject = {};
 let gShipDistanceFromGround = 0;
 let gShipAngle = 0;
-let gShipAngleCos = Math.cos(gShipAngle);
-let gShipAngleSin = Math.sin(gShipAngle);
 let gThrusting = false;
 let gAngleStart = 0;
 let gShipBlinkEndMS_RotateMS = 0;
@@ -75,15 +73,15 @@ let gPointsByKeepingLow = 0;
 /*---------------------------------------------------------------------------*/
 const types = 
 {
-    SHIP: 			'ship',
-    GROUND: 		'ground',
-    IMAGE: 			'image',
-    ICON: 			'icon',
-    CIRCLE: 		'circle',
-    VECTOR: 		'vector',
-    BULLET: 		'bullet',
-    FRAGMENT: 		'fragment',
-    TEXT_BUBBLE: 	'text_bubble'
+    SHIP: 			1 << 0,
+    GROUND: 		1 << 1,
+    IMAGE: 			1 << 2,
+    ICON: 			1 << 3,
+    CIRCLE: 		1 << 4,
+    VECTOR: 		1 << 5,
+    BULLET: 		1 << 6,
+    FRAGMENT: 		1 << 7,
+    TEXT_BUBBLE: 	1 << 8
 }
 
 /*---------------------------------------------------------------------------*/
@@ -116,9 +114,12 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 	this.accY = accY;
 	this.color = color;
 	this.size = size;
+	this.width = size;
+	this.height = size;
 	this.ready = true;
 	this.alive = true;
 	this.isFixed = false;
+	this.killedByBitmask = 0;
 
 	// add this object to the gObjects array
 	if (gObjects.length < kMaxNumObjects)
@@ -128,7 +129,9 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 	else
 	{
 		// once gObjects has filled up, look for an unused slot - this
-		// keeps the gObjects array from growing indefinitely
+		// keeps the gObjects array from growing indefinitely - this is
+		// importsnt since we iterate through the entire gObjects array
+		// on every frame
 		let foundOpenSlot = false;
 		for(let i = 0; i < gObjects.length; i++) 
 		{
@@ -142,7 +145,7 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 		}
 
 		// if you hit this assert it means you've exceeded kMaxNumObjects
-		// it's OK to increase it but it will impact performance
+		// (it's OK to increase it but it will impact performance)
 		ASSERT(foundOpenSlot, "Exceeded kMaxNumObjects");
 	}
 }
@@ -150,9 +153,17 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 /*---------------------------------------------------------------------------*/
 Object.prototype.isActive = function() { return (this.ready && this.alive); }
 Object.prototype.setLifetime = function(ms) { this.expireTimeMS = (gNowMS + ms); }
+Object.prototype.setKilledBy = function(k) { this.killedByBitmask = k; }
 
 /*---------------------------------------------------------------------------*/
-// rotate point p around center point c
+function CalcSinCosForShip(a)
+{
+	gShipAngleCos = Math.cos(gShipAngle);
+	gShipAngleSin = Math.sin(gShipAngle);
+}
+
+/*---------------------------------------------------------------------------*/
+// rotate point p around center point c, and return rotated point
 function Rotate(p, c, sin, cos)
 {
 	// normalize
@@ -195,7 +206,8 @@ let RotateAndDraw = function (verts, pos, color)
 
 	DrawPolygon(rv, color);
 
-	return rv; 	// return rotated vertices
+	// return rotated vertices (only used for shipObject)
+	return rv; 	
 }
 
 /*---------------------------------------------------------------------------*/
@@ -204,9 +216,11 @@ let ColorForShip = function ()
 	let color = gShipObject.color;
 	const kBlinkSpeedMS = 100;
 
+	const doBlink = gShipBlinkEndMS_RotateMS > gNowMS || 
+					gShipDistanceFromGround < kDistanceGameScoreCutoff;
+
 	// handle blinking
-	if (gShipBlinkEndMS_RotateMS > gNowMS || 
-		gShipDistanceFromGround < kDistanceGameScoreCutoff)
+	if (doBlink)
 	{
 		if (gNextBlinkMS === 0 || (gNextBlinkMS < gNowMS))
 		{
@@ -225,8 +239,10 @@ let ColorForShip = function ()
 /*---------------------------------------------------------------------------*/
 let ShipReset = function () 
 {
-	Explosion(gShipObject.x, gShipObject.y);
+	//Explosion(gShipObject.x, gShipObject.y);
 	gShipObject.isFixed = true;
+	gShipAngle = 0;
+	CalcSinCosForShip();
 	gShipObject.x = (canvas.width / 2);
 	gShipObject.y = 400; // kGroundMidpoint;
 	gShipObject.velX = 0;
@@ -273,7 +289,6 @@ let DrawShip = function (obj)
 /*---------------------------------------------------------------------------*/
 let DrawCircle = function (x, y, r, color) 
 {
-	ASSERT(r > 0);
 	ctx.beginPath();
 	ctx.fillStyle = color;
 	ctx.arc(x, y, r, 0, M_2PI);
@@ -330,7 +345,6 @@ Object.prototype.updateAliveState = function()
 	{
 		if (this.rightX < 0)
 			this.alive = false;
-
 		return;
 	}
 
@@ -346,7 +360,7 @@ Object.prototype.updateAliveState = function()
 }
 
 /*---------------------------------------------------------------------------*/
-Object.prototype.updatePosition = function(delta) 
+Object.prototype.applyPhysics = function(delta) 
 {
 	if (this.isFixed)
 		return;
@@ -514,28 +528,37 @@ let ScoreEvent = function(ev)
 }
 
 /*---------------------------------------------------------------------------*/
+// calc a velocity vector from speed & angle
 let Velocity = function(speed, angle)
 {
 	return new Point(speed * Math.sin(angle), -(speed * Math.cos(angle)));
 }
 
 /*---------------------------------------------------------------------------*/
-let ShootBullet = function(x, y)
+let ShootBullet = function(x, y, a)
 {
 	const kBulletSpeed = 400;
+	const v = Velocity(kBulletSpeed, a);
+	let bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 4);
+	bullet.setLifetime(4000);
+}
+
+/*---------------------------------------------------------------------------*/
+let ShootBullets = function(x, y)
+{
 	const kOffset = (M_PI_4 * 0.27);
 
-	let v = Velocity(kBulletSpeed, gShipAngle);
-	let bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.setLifetime(4000);
+	ShootBullet(x, y, gShipAngle - kOffset);
+	ShootBullet(x, y, gShipAngle);
+	ShootBullet(x, y, gShipAngle + kOffset);
+}
 
-	v = Velocity(kBulletSpeed, gShipAngle + kOffset);
-	bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.setLifetime(4000);
-
-	v = Velocity(kBulletSpeed, gShipAngle - kOffset);
-	bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 0);
-	bullet.setLifetime(4000);
+/*---------------------------------------------------------------------------*/
+// do some random explosions
+let DoExplosions = function () 
+{
+	for (let i = 0; i < 12; i++)
+		Explosion(RandomWidth(20), RandomHeight(20));
 }
 
 /*---------------------------------------------------------------------------*/
@@ -559,7 +582,7 @@ let Explosion = function(x, y)
 		const accY = rnd(0, kNumFrags) * 16; // some gravity
 		
 		let obj = new Object(types.FRAGMENT, x, y, v.x, v.y, accX, accY, 0, 0);
-		obj.setLifetime(rnd(1000, 4000));
+		obj.setLifetime(rnd(2600, 5000));
 	}
 }
 
@@ -569,7 +592,8 @@ let NewFallingObject = function()
 	const x = RandomWidth(10); 		// random horiz start
 	const accelY = rnd(40, 160);	// random vertical (falling) acceleration
 	const size = rnd(8,20);			// random size for the circle
-	new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), size);
+	let obj = new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), size);
+	obj.setKilledBy(types.BULLET);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -578,6 +602,8 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src)
 	let obj = new Object(types.IMAGE, x, y, velX, velY, accX, accY, 0, 0);
 	obj.image = new Image();
 	obj.image.src = src; 
+	obj.width = obj.image.width;
+	obj.height = obj.image.height;
 
 	// start out as not ready until the img is loaded
 	obj.ready = false;
@@ -622,16 +648,24 @@ let CheckShipWithinLines = function()
 			continue;
 
 		if (CheckShipWithSingleGroundObject(g))
+		{
+			Explosion(gShipObject.x, gShipObject.y);
 			ShipReset();
+			break;
+		}
 	}
 }
 
 /*---------------------------------------------------------------------------*/
 let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 {
+	// since this is only ever called with a ship vertex as the obj,
+	// call it ship for clarity
+	let ship = obj;
+
 	// only check the segment we're in since we're checking vertical distance
 	// TODO: can we optimize this so we don't have to iterate over all ground objects?
-	if (obj.x < leftX || obj.x > rightX)
+	if (ship.x < leftX || ship.x > rightX)
 		return INT_MAX;
 	
 	// avoid divide by zero
@@ -644,12 +678,12 @@ let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 	// b = y - mx, since y = mx + b
 	const b = (rightY - (m * rightX));
 	
-	// now that we have the equation of the line, find the y value of the
-	// point on the line with the x-coord of the ship (y = mx + b)
-	const y = ((m * obj.x) + b);
+	// now that we have the equation of the line (m & b), find the y value of
+	// the point on the line with the x-coord of the ship (using y = mx + b)
+	const lineY = ((m * ship.x) + b);
 	
-	// the distance is the vertical line from the ship to the line segment
-	const d = (y - obj.y);
+	// now the distance is just the distance between the y coordinates
+	const d = (lineY - ship.y);
 	return d;
 }
 
@@ -693,7 +727,7 @@ let CheckShipWithSingleGroundObject = function(g)
 	{
 		if (IsOutsideLine(	g.isBottom, 
 							g.rightX, g.rightY, 
-							g.x, g.y,
+							g.x, g.y, 
 							gShipObject.vertices[i]))
 			return true;
 	}
@@ -794,7 +828,7 @@ let DrawTextObject = function(obj)
 }
 
 /*---------------------------------------------------------------------------*/
-let Rotation = function (numRotations)
+let RotationScore = function (numRotations)
 {
 	let ev = 0;
 	switch (numRotations)
@@ -833,7 +867,7 @@ let CheckRotation = function (isRotating)
 			{
 				gNumRotations++;
 				gShipBlinkEndMS_RotateMS = (gNowMS + 800);
-				Rotation(gNumRotations);
+				RotationScore(gNumRotations);
 			}
 		}
 	}
@@ -871,7 +905,7 @@ let GetUserInput = function (delta)
 		if (gNowMS - gLastShootMS > 50)
 		{
 			gLastShootMS = gNowMS;
-			ShootBullet(gShipObject.x, gShipObject.y);
+			ShootBullets(gShipObject.x, gShipObject.y);
 		}
 	}
 
@@ -888,10 +922,7 @@ let GetUserInput = function (delta)
 	}
 
 	if (rotating)
-	{
-		gShipAngleCos = Math.cos(gShipAngle);
-		gShipAngleSin = Math.sin(gShipAngle);
-	}
+		CalcSinCosForShip();
 
 	CheckRotation(rotating);
 }
@@ -900,12 +931,21 @@ let GetUserInput = function (delta)
 let EitherOfType = function(o1, o2, type) { return (o1.type === type || o2.type === type); }
 let BothOfType = function(o1, o2, type) { return (o1.type === type && o2.type === type); }
 let ExactlyOneOfType = function(o1, o2, type) { return (o1.type === type ^ o2.type === type); }
+let ExactlyOneOfEachType = function(o1, o2, type1, type2) 
+{ 	
+	return (o1.type === type1 && o2.type === type2) ||
+			(o1.type === type2 && o2.type === type1); 
+}
 
 /*---------------------------------------------------------------------------*/
 let Collided = function(o1, o2)
 {
+	if (!(o1.killedByBitmask & o2.type ||
+		o2.killedByBitmask & o1.type))
+		return;
+
 	// only bullets do damage
-	if (!ExactlyOneOfType(o1, o2, types.BULLET))
+	/*if (!ExactlyOneOfType(o1, o2, types.BULLET))
 		return false;
 
 	if (EitherOfType(o1, o2, types.SHIP))
@@ -918,20 +958,45 @@ let Collided = function(o1, o2)
 		return false;
 
 	if (EitherOfType(o1, o2, types.TEXT_BUBBLE))
-		return false;
+		return false;*/
 
 	// to-do: use actual height & width here
 	const w = 6;
 	const h = 6;
-	const collided =  	o1.x <= (o2.x + h) &&
-						o2.x <= (o1.x + h) &&
-						o1.y <= (o2.y + w) &&
-						o2.y <= (o1.y + w);
+	const collided =  	o1.x <= (o2.x + o2.width) &&
+						o2.x <= (o1.x + o1.height) &&
+						o1.y <= (o2.y + o2.height) &&
+						o2.y <= (o1.y + o1.height);
 
 	if (collided)
 	{
-		o1.alive = false;
-		o2.alive = false;
+		let shipInvolved = false;
+		let otherObj = {};
+		if (o1 === gShipObject)
+		{
+			shipInvolved = true;
+			otherObj = o2;
+		}
+		else if (o2 === gShipObject)
+		{
+			shipInvolved = true;
+			otherObj = o1;
+		}
+
+		if (shipInvolved)
+		{
+			if (otherObj.type === types.CIRCLE)
+			{	
+				ScoreEvent(scores.eRescuedHostage3);
+				otherObj.alive = false;
+				Explosion(otherObj.x, otherObj.y);
+			}
+		}
+		else
+		{
+			o1.alive = false;
+			o2.alive = false;
+		}
 	}
 
 	return collided;
@@ -970,7 +1035,7 @@ let DrawText = function ()
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
 
-	const d = gShipDistanceFromGround === INT_MAX ? 0 : gShipDistanceFromGround;
+	const d = (gShipDistanceFromGround === INT_MAX ? 0 : gShipDistanceFromGround);
 	ctx.fillText("# objects: " + gNumActiveObjects + 
 							", " + gObjects.length + 
 							", " + d.toFixed(0), 
@@ -995,7 +1060,7 @@ let AnimateAndDraw = function (delta)
   		let obj = gObjects[i];
     	if(obj.isActive()) 
     	{
-      		obj.updatePosition(delta);
+      		obj.applyPhysics(delta);
       		obj.adjustBounds();
       		obj.updateAliveState();
       		obj.draw();
@@ -1013,14 +1078,6 @@ let ClearCanvas = function (delta)
 }
 
 /*---------------------------------------------------------------------------*/
-// do some random explosions
-let DoExplosions = function () 
-{
-	for (let i = 0; i < 12; i++)
-		Explosion(RandomWidth(20), RandomHeight(20));
-}
-
-/*---------------------------------------------------------------------------*/
 let DoSomeWork = function (delta) 
 {
 	ClearCanvas();
@@ -1035,9 +1092,11 @@ let DoSomeWork = function (delta)
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
-	gShipObject = new Object(types.SHIP,0,0,0,0,0,0,kShipColor,10);
+	gShipObject = new Object(types.SHIP,0,0,0,0,0,0,kShipColor,8);
+	gShipObject.setKilledBy(types.CIRCLE);
 	ShipReset();
 
+	// start the lower & upper ground objects
 	NewGroundObject(canvas.width, canvas.height - 20, true, true);
 	NewGroundObject(canvas.width, canvas.height - 400, false, true);
 
