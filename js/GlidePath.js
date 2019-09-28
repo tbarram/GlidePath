@@ -18,26 +18,32 @@ function ASSERT(cond, str)
 /*---------------------------------------------------------------------------*/
 // utilities
 let rnd = function(min, max) { return (min + Math.floor(Math.random() * (max - min))); }
-let RandomWidth = function (m) { return rnd(m, canvas.width - m); }
-let RandomHeight = function (m) { return rnd(m, canvas.height - m); }
+let RandomWidth = function (mL,mR) { return rnd(mL, canvas.width - (mR || mL)); }
+let RandomHeight = function (mT,mB) { return rnd(mT, canvas.height - (mB || mT)); }
 let RGB = function(r, g ,b) { return 'rgb(' + r + ',' + g + ',' + b +')'; }
 let RandomColor = function() { return RGB(rnd(0,255), rnd(0,255), rnd(0,255)); }
 
 /*---------------------------------------------------------------------------*/
-function Point(x, y) { this.x = x; this.y = y; }
-
-/*---------------------------------------------------------------------------*/
 const kMaxNumObjects = 256;
-const kRotateSpeed = 7;
-const kThrustSpeed = 500;
+const kRotateSpeed = 9;
+const kThrustSpeed = 700; //620;
 const kGroundMidpoint = 300;
-const kDistanceGameScoreCutoff = 32;
+const kDistanceGameScoreCutoff = 48; //32;
+const kGroundCollisionBuffer = 1;
+const kGroundSpeedBottom = 160;
+const kGroundSpeedTop = 190;
 
 /*---------------------------------------------------------------------------*/
 const kBackgroundColor = RGB(54,61,69);
 const kTextColor = RGB(250,250,250); 
 const kShipColor = RGB(20,119,155); 
 const kLineColor = RGB(124,209,12); 
+
+/*---------------------------------------------------------------------------*/
+const eWaitingForStart = 'eWaitingForStart';
+const eStarting = 'eStarting';
+const eStarted = 'eStarted';
+const eEnded = 'eEnded';
 
 /*---------------------------------------------------------------------------*/
 const M_PI = Math.PI;
@@ -63,10 +69,14 @@ let gNextBlinkMS = 0;
 let gBlink = false;
 let gNumActiveObjects = 0;
 let gLastShootMS = 0;
+let gGameStartTimeMS = 0;
+let gGameState = eWaitingForStart;
 let gScore = 0;
-let gScoreEventCounter = {};
-let gBestScoreEventCounter = {};
-let gBestAllTimeScoreEventCounter = {};
+let gScoreBest = 0;
+let gScoreBestAllTime = 0;
+let gScoreEventCounter = new Map();
+let gScoreEventCounterBest = new Map();
+let gScoreEventCounterBestAllTime = new Map();
 let gPointsByKeepingLowIndex = 1;
 let gPointsByKeepingLow = 0;
 
@@ -121,31 +131,37 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 	this.isFixed = false;
 	this.killedByBitmask = 0;
 
-	// add this object to the gObjects array
+	AddObject(this);
+}
+
+/*---------------------------------------------------------------------------*/
+function AddObject(obj)
+{
+	// add to the gObjects array
 	if (gObjects.length < kMaxNumObjects)
 	{
-		gObjects.push(this);
+		gObjects.push(obj);
 	}
 	else
 	{
-		// once gObjects has filled up, look for an unused slot - this
-		// keeps the gObjects array from growing indefinitely - this is
-		// importsnt since we iterate through the entire gObjects array
-		// on every frame
+		// once gObjects has filled up, look for an unused slot - this keeps
+		// the gObjects array from growing indefinitely - this is important
+		// since we iterate through the entire gObjects array on every frame
+		// also, by re-using these slots, we avoid the JS garbage collection
 		let foundOpenSlot = false;
 		for(let i = 0; i < gObjects.length; i++) 
 		{
 			if (!gObjects[i].alive)
 			{
 				// found a free slot
-				gObjects[i] = this;
+				gObjects[i] = obj;
 				foundOpenSlot = true;
 				break;
 			}
 		}
 
 		// if you hit this assert it means you've exceeded kMaxNumObjects
-		// (it's OK to increase it but it will impact performance)
+		// (it's OK to increase kMaxNumObjects but it will impact performance)
 		ASSERT(foundOpenSlot, "Exceeded kMaxNumObjects");
 	}
 }
@@ -153,7 +169,8 @@ function Object(type, x, y, velX, velY, accX, accY, color, size)
 /*---------------------------------------------------------------------------*/
 Object.prototype.isActive = function() { return (this.ready && this.alive); }
 Object.prototype.setLifetime = function(ms) { this.expireTimeMS = (gNowMS + ms); }
-Object.prototype.setKilledBy = function(k) { this.killedByBitmask = k; }
+Object.prototype.setKilledBy = function(types) { this.killedByBitmask |= types; }
+Object.prototype.isKilledBy = function(obj) { return this.killedByBitmask & obj.type; }
 
 /*---------------------------------------------------------------------------*/
 function CalcSinCosForShip(a)
@@ -182,25 +199,29 @@ function Rotate(p, c, sin, cos)
 }
 
 /*---------------------------------------------------------------------------*/
-let DrawPolygon = function (verts, color) 
+let DrawPolygon = function (vs, color) 
 {
 	ctx.beginPath();
 	ctx.fillStyle = color;
-	ctx.moveTo(verts[0].x, verts[0].y);
-	for(let i = 1; i < verts.length; i++)
-		ctx.lineTo(verts[i].x, verts[i].y);
+	ctx.shadowBlur = DoShadow() ? 20 : 0; 
+	ctx.shadowColor = "white";
+	ctx.moveTo(vs[0].x, vs[0].y);
+	for(let i = 1; i < vs.length; i++)
+		ctx.lineTo(vs[i].x, vs[i].y);
 	ctx.closePath();
 	ctx.fill();
+
+	ctx.shadowBlur = 0; // reset
 }
 
 /*---------------------------------------------------------------------------*/
-let RotateAndDraw = function (verts, pos, color) 
+let RotateAndDraw = function (vs, pos, color) 
 {
 	// rotate the vertices and store in rv
 	let rv = []; 
-	for (let i = 0; i < verts.length; i++)
+	for (let i = 0; i < vs.length; i++)
 	{
-		let pt = Rotate(verts[i], pos, gShipAngleSin, gShipAngleCos);
+		let pt = Rotate(vs[i], pos, gShipAngleSin, gShipAngleCos);
 		rv.push(pt);
 	}
 
@@ -211,16 +232,25 @@ let RotateAndDraw = function (verts, pos, color)
 }
 
 /*---------------------------------------------------------------------------*/
+let DoBlink = function()
+{
+	return (gShipBlinkEndMS_RotateMS > gNowMS);
+}
+
+/*---------------------------------------------------------------------------*/
+let DoShadow = function()
+{
+	return (gShipDistanceFromGround < kDistanceGameScoreCutoff);
+}
+
+/*---------------------------------------------------------------------------*/
 let ColorForShip = function () 
 {
 	let color = gShipObject.color;
 	const kBlinkSpeedMS = 100;
 
-	const doBlink = gShipBlinkEndMS_RotateMS > gNowMS || 
-					gShipDistanceFromGround < kDistanceGameScoreCutoff;
-
 	// handle blinking
-	if (doBlink)
+	if (DoBlink())
 	{
 		if (gNextBlinkMS === 0 || (gNextBlinkMS < gNowMS))
 		{
@@ -237,7 +267,7 @@ let ColorForShip = function ()
 }
 
 /*---------------------------------------------------------------------------*/
-let ShipReset = function () 
+let ResetShip = function () 
 {
 	//Explosion(gShipObject.x, gShipObject.y);
 	gShipObject.isFixed = true;
@@ -250,9 +280,8 @@ let ShipReset = function ()
 	gShipObject.accX = 0;
 	gShipObject.accY = 100;
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
-	gScore = 0;
-	gPointsByKeepingLowIndex = 1;
-	gPointsByKeepingLow = 0;
+
+	gGameState = eEnded;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -267,10 +296,10 @@ let DrawShip = function (obj)
 	const kThrustHeight = 8;
 
 	let ship = [];
-	ship.push(new Point(obj.x - kHalfBaseWidth, obj.y + kHalfHeight)); // bottomL
-	ship.push(new Point(obj.x, obj.y + kHalfHeight - kCenterIndent)); // bottomC
-	ship.push(new Point(obj.x + kHalfBaseWidth, obj.y + kHalfHeight)); // bottomR
-	ship.push(new Point(obj.x, obj.y - kHalfHeight));	// top
+	ship.push({x: (obj.x - kHalfBaseWidth), y: (obj.y + kHalfHeight)}); // bottomL
+	ship.push({x: (obj.x), y: (obj.y + kHalfHeight - kCenterIndent)}); // bottomC
+	ship.push({x: (obj.x + kHalfBaseWidth), y: (obj.y + kHalfHeight)}); // bottomR
+	ship.push({x: (obj.x), y: (obj.y - kHalfHeight)});	// top
 
 	gShipObject.vertices = RotateAndDraw(ship, obj, ColorForShip());
 
@@ -278,55 +307,79 @@ let DrawShip = function (obj)
 	{
 		// draw thrust triangle
 		let thrust = [];
-		thrust.push(new Point(obj.x - kThrustWidth, obj.y + kHalfHeight)); // bottomL
-		thrust.push(new Point(obj.x, obj.y + kHalfHeight + kThrustHeight)); // bottomC
-		thrust.push(new Point(obj.x + kThrustWidth, obj.y + kHalfHeight)); // bottomR
+		thrust.push({x: (obj.x - kThrustWidth), y: (obj.y + kHalfHeight)}); // bottomL
+		thrust.push({x: (obj.x), y: (obj.y + kHalfHeight + kThrustHeight)}); // bottomC
+		thrust.push({x: (obj.x + kThrustWidth), y: (obj.y + kHalfHeight)}); // bottomR
 
 		RotateAndDraw(thrust, obj, "red");
 	}
 }
 
 /*---------------------------------------------------------------------------*/
-let DrawCircle = function (x, y, r, color) 
+let DrawCircle = function (obj, r, color) 
 {
+	// use args if provided, else use object state
+	r = r || obj.size;
+	color = color || obj.color;
+
 	ctx.beginPath();
 	ctx.fillStyle = color;
-	ctx.arc(x, y, r, 0, M_2PI);
+
+	// handle gradients
+	if (obj.gradient || obj.lightGradient)
+	{
+		var gradient = ctx.createLinearGradient(obj.x,obj.y,obj.x+r,obj.y+r);
+
+		if (obj.lightGradient)
+		{
+			gradient.addColorStop(0, color);
+			gradient.addColorStop(1, "white");
+		}
+		else
+		{
+			gradient.addColorStop(0, "black");
+			gradient.addColorStop(0.5, color);
+			gradient.addColorStop(1, color);
+			ctx.shadowBlur = obj.shadowBlur;
+			ctx.shadowColor = "white";
+		}
+
+		ctx.fillStyle = gradient;
+	}
+
+	ctx.arc(obj.x, obj.y, r, 0, M_2PI);
 	ctx.fill();
+
+	ctx.shadowBlur = 0; // reset
 }
 
 /*---------------------------------------------------------------------------*/
 Object.prototype.draw = function() 
 {
-	if (this.type === types.IMAGE)
+	switch (this.type)
 	{
-		ASSERT(this.image);
-		ctx.drawImage(this.image, this.x, this.y);
+		case types.IMAGE:
+			ctx.drawImage(this.image, this.x, this.y);
+			break;
+		case types.CIRCLE:
+			DrawCircle(this);
+			break;
+		case types.BULLET:
+			DrawCircle(this, 3, "red");
+			break
+		case types.FRAGMENT:
+			DrawCircle(this, 2, "white");
+			break;
+		case types.SHIP:
+			DrawShip(this);
+			break;
+		case types.GROUND:
+			DrawGroundObject(this);
+			break;
+		case types.TEXT_BUBBLE:
+			DrawTextObject(this);
+			break;
 	}
-	else if (this.type === types.CIRCLE)
-	{
-		DrawCircle(this.x, this.y, this.size, this.color);
-  	}
-  	else if (this.type === types.BULLET)
-	{
-		DrawCircle(this.x, this.y, 3, "red");
-  	}
-  	else if (this.type === types.FRAGMENT)
-	{
-		DrawCircle(this.x, this.y, 2, "white");
-  	}
-  	else if (this.type === types.SHIP)
-  	{
-  		DrawShip(this);
-  	}
-  	else if (this.type === types.GROUND)
-  	{
-  		DrawGroundObject(this);
-  	}
-  	else if (this.type === types.TEXT_BUBBLE)
-  	{
-  		DrawTextObject(this);
-  	}
 };
 
 /*---------------------------------------------------------------------------*/
@@ -401,8 +454,8 @@ Object.prototype.adjustBounds = function()
 /*---------------------------------------------------------------------------*/
 let NewTextBubble = function(text, pos, color)
 {
-	const x = pos.x - 0;
-	const y = pos.y - 30;
+	const x = pos.x - 50;
+	const y = pos.y - 50;
 	let obj = new Object(types.TEXT_BUBBLE, x, y, -20, -50, 20, -20, color, 0);
 	obj.text = text;
 	obj.setLifetime(3000);
@@ -509,9 +562,10 @@ let ScoreEvent = function(ev)
 	
 	const score = ScoreForEvent(ev);
 	gScore += score;
-	
+
 	// update the score event counter
-	//gScoreEventCounter[ev]++;
+	const prev = gScoreEventCounter.get(ev);
+	gScoreEventCounter.set(ev, prev ? prev + 1 : 1);
 	
 	let scoreText = ((score > 0 ? "+" : "") + score);
 	
@@ -520,18 +574,81 @@ let ScoreEvent = function(ev)
 		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")");
 	
 	// if it's the first time then add the !
-	//if (sScoreEventCounter[ev] == 1)
-	//	scoreText += "!";
+	if (gScoreEventCounter.get(ev) === 1)
+		scoreText += "!";
 	
 	const color = TextColorForScoreEvent(ev);
 	NewTextBubble(scoreText, gShipObject, color);
 }
 
 /*---------------------------------------------------------------------------*/
+let ScoreStatsUI = function(list, x, y)
+{
+	list.forEach((value, key) => 
+	{
+		const score = ScoreForEvent(key);
+		const text = LabelForScoreEvent(key) + " (+" + score + ") : " + value;
+
+		ctx.font = "12px Helvetica";
+		ctx.fillStyle = TextColorForScoreEvent(key);
+    	ctx.fillText(text, x, y);
+		y += 16;
+	});
+
+	return y;
+}
+
+/*---------------------------------------------------------------------------*/
+let ShowScoreStats = function()
+{
+	const kScoreColor2 = "white";
+	const kScoreText2 = "16px Helvetica";
+	const x = canvas.width - 80;
+	let y = 50;
+
+  	ctx.fillStyle = kScoreColor2;
+	ctx.font = kScoreText2;
+	ctx.textAlign = "right";
+	
+	const stage = "Current"; //(mDistanceGameStatus == eWaitingForStart ? "Last" : "Current");
+	ctx.fillText("--- " + stage + " score: " + gScore + " ---", x, y);
+	y += 16;
+	
+	y = ScoreStatsUI(gScoreEventCounter, x, y);
+	
+	/*if (mNewDistanceGameScoreBest > 0 &&
+		(!mNewDistanceGameScoreBestAllTime ||
+		 mNewDistanceGameScoreBest < mNewDistanceGameScoreBestAllTime))*/
+	{
+		if (gScoreEventCounterBest.size > 0)
+		{
+			y += 10;
+			ctx.fillStyle = kScoreColor2;
+			ctx.font = kScoreText2;
+			ctx.fillText("--- Best score: " + gScoreBest + " ---", x, y);
+			
+			y += 16;
+			y = ScoreStatsUI(gScoreEventCounterBest, x, y);
+		}
+	}
+	
+	if (gScoreEventCounterBestAllTime.size > 0)
+	{
+		y += 10;
+		ctx.fillStyle = kScoreColor2;
+		ctx.font = kScoreText2;
+		ctx.fillText("--- Best all-time score: " + gScoreBestAllTime + " ---", x, y);
+		
+		y += 16;
+		ScoreStatsUI(gScoreEventCounterBestAllTime, x, y);
+	}
+}
+
+/*---------------------------------------------------------------------------*/
 // calc a velocity vector from speed & angle
 let Velocity = function(speed, angle)
 {
-	return new Point(speed * Math.sin(angle), -(speed * Math.cos(angle)));
+	return {x: (speed * Math.sin(angle)), y: (-(speed * Math.cos(angle)))};
 }
 
 /*---------------------------------------------------------------------------*/
@@ -589,11 +706,27 @@ let Explosion = function(x, y)
 /*---------------------------------------------------------------------------*/
 let NewFallingObject = function()
 {
-	const x = RandomWidth(10); 		// random horiz start
+	const kBeQuiet = true;
+	if (kBeQuiet)
+		return true;
+
+	const x = RandomWidth(10, 240); // random horiz start
 	const accelY = rnd(40, 160);	// random vertical (falling) acceleration
 	const size = rnd(8,20);			// random size for the circle
 	let obj = new Object(types.CIRCLE, x, 0, 0, 0, 0, accelY, RandomColor(), size);
 	obj.setKilledBy(types.BULLET);
+	obj.shadowBlur = rnd(10,40);
+	obj.lightGradient = rnd(1,3) > 1 ? true : false;
+	obj.gradient = !obj.lightGradient;
+
+	// schedule the next one
+	if (gGameState === eStarted)
+	{
+		const elapsedGameTimeMS = (gNowMS - gGameStartTimeMS);
+		const avgNextMS = 400 + 4000 * (1 - ( 1 / elapsedGameTimeMS));
+		//const nextObjectMS = rnd(600, 1000);
+		setTimeout(function(){ NewFallingObject(); }, avgNextMS);
+	}
 }
 
 /*---------------------------------------------------------------------------*/
@@ -616,16 +749,70 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src)
 /*---------------------------------------------------------------------------*/
 let DoGame = function()
 {
-	const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
-	if (d > 0)
+	ctx.fillStyle = "white";
+	ctx.font = "20px Chalkboard";
+	ctx.textAlign = "center";
+	ctx.textBaseline = "bottom";
+
+	switch (gGameState)
 	{
-		const nextTextBubblePoints = (gPointsByKeepingLowIndex * 1000);
-		
-		gPointsByKeepingLow += d;
-		if (gPointsByKeepingLow > nextTextBubblePoints)
+		case eWaitingForStart:
 		{
-			gPointsByKeepingLowIndex++;
-			ScoreEvent(scores.eStayedLow);
+			ctx.fillText("Waiting For Start", canvas.width/2, 80);
+			ctx.fillText("Last Score: " + gScore, canvas.width/2, 108);
+			ctx.fillText("Best Score: " + gScoreBest, canvas.width/2, 136);
+			if (gScoreBestAllTime)
+				ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
+
+			if (gThrusting)
+				gGameState = eStarting;
+
+			break;
+		}
+
+		case eStarting:
+		{
+			gGameState = eStarted;
+			gGameStartTimeMS = gNowMS;
+			setTimeout(function(){ NewFallingObject(); }, 800);
+			break;
+		}
+
+		case eStarted:
+		{
+			ctx.fillText("Score: " + gScore, canvas.width/2, 100);
+
+			const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
+			if (d > 0)
+			{
+				const nextTextBubblePoints = (gPointsByKeepingLowIndex * 1000);
+				
+				gPointsByKeepingLow += d;
+				if (gPointsByKeepingLow > nextTextBubblePoints)
+				{
+					gPointsByKeepingLowIndex++;
+					ScoreEvent(scores.eStayedLow);
+				}
+			}
+			break;
+		}
+
+		case eEnded:
+		{
+			gGameState = eWaitingForStart;
+
+			gPointsByKeepingLowIndex = 1;
+			gPointsByKeepingLow = 0;
+
+			if (gScore > gScoreBest)
+			{
+				gScoreBest = gScore;
+				gScoreEventCounterBest = new Map(gScoreEventCounter);
+			}
+
+			gScore = 0;
+			gScoreEventCounter.clear();
+			break;
 		}
 	}
 }
@@ -650,7 +837,7 @@ let CheckShipWithinLines = function()
 		if (CheckShipWithSingleGroundObject(g))
 		{
 			Explosion(gShipObject.x, gShipObject.y);
-			ShipReset();
+			ResetShip();
 			break;
 		}
 	}
@@ -669,17 +856,17 @@ let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 		return INT_MAX;
 	
 	// avoid divide by zero
-	if ((rightX - leftX) == 0)
+	if ((rightX - leftX) === 0)
 		return INT_MAX;
 	
 	// slope
 	const m = ((rightY - leftY) / (rightX - leftX));
 
-	// b = y - mx, since y = mx + b
+	// b = y - mx (since y = mx + b)
 	const b = (rightY - (m * rightX));
 	
-	// now that we have the equation of the line (m & b), find the y value of
-	// the point on the line with the x-coord of the ship (using y = mx + b)
+	// now that we have the equation of the line (y = mx + b), find the 
+	// y value of the point on the line with the x-coord of the ship 
 	const lineY = ((m * ship.x) + b);
 	
 	// now the distance is just the distance between the y coordinates
@@ -696,14 +883,14 @@ let IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
 	if (d > 0 && d < INT_MAX)
 		gShipDistanceFromGround = Math.min(d, gShipDistanceFromGround);
 
-	return (d < 0);
+	return (d < (-kGroundCollisionBuffer));
 }
 
 /*---------------------------------------------------------------------------*/
 let IsAboveLine = function(rightX, rightY, leftX, leftY, obj)
 {
 	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
-	return (d > 0 && d < INT_MAX);
+	return (d > kGroundCollisionBuffer && d < INT_MAX);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -747,6 +934,7 @@ let DrawGroundObject = function(obj)
 	ctx.beginPath();
 	ctx.strokeStyle = kLineColor;
 	ctx.lineWidth = 4;
+	ctx.lineJoin = "round";
 	ctx.moveTo(obj.x, obj.y);
 	ctx.lineTo(obj.rightX, obj.rightY);
 	ctx.stroke();
@@ -808,9 +996,6 @@ Object.prototype.initGround = function(isBottom, increasing)
 /*---------------------------------------------------------------------------*/
 let NewGroundObject = function(x, y, isBottom, increasing)
 {
-	const kGroundSpeedBottom = 120;
-	const kGroundSpeedTop = 140;
-
 	const velX = (isBottom ? -kGroundSpeedBottom : -kGroundSpeedTop);
 	let obj = new Object(types.GROUND, x, y, velX, 0, 0, 0, 0, 0);
 	obj.initGround(isBottom, increasing);
@@ -895,9 +1080,12 @@ let GetUserInput = function (delta)
 		gThrusting = true;
 		gShipObject.isFixed = false;
 
+		// TODO: tune the responsiveness
+		let thrustSpeed = kThrustSpeed;
+
 		// apply thrust to velocity
-		gShipObject.velY -= (gShipAngleCos * kThrustSpeed * delta); // vertical thrust
-		gShipObject.velX += (gShipAngleSin * kThrustSpeed * delta); // horiz thrust
+		gShipObject.velY -= (gShipAngleCos * thrustSpeed * delta); // vertical thrust
+		gShipObject.velX += (gShipAngleSin * thrustSpeed * delta); // horiz thrust
 	}
 
 	if (88 in gKeysDown) 
@@ -938,40 +1126,34 @@ let ExactlyOneOfEachType = function(o1, o2, type1, type2)
 }
 
 /*---------------------------------------------------------------------------*/
+let ShipCollidedWithFallingObject = function()
+{
+	//ScoreEvent(scores.eRescuedHostage3);
+	ResetShip();
+}
+
+/*---------------------------------------------------------------------------*/
 let Collided = function(o1, o2)
 {
-	if (!(o1.killedByBitmask & o2.type ||
-		o2.killedByBitmask & o1.type))
+	return 	o1.x <= (o2.x + o2.width) &&
+			o2.x <= (o1.x + o1.height) &&
+			o1.y <= (o2.y + o2.height) &&
+			o2.y <= (o1.y + o1.height);
+}
+
+/*---------------------------------------------------------------------------*/
+let CheckCollision = function(o1, o2)
+{
+	if (!(o1.isKilledBy(o2) || o2.isKilledBy(o1)))
 		return;
 
-	// only bullets do damage
-	/*if (!ExactlyOneOfType(o1, o2, types.BULLET))
-		return false;
-
-	if (EitherOfType(o1, o2, types.SHIP))
-		return false;
-
-	if (EitherOfType(o1, o2, types.FRAGMENT))
-		return false;
-
-	if (EitherOfType(o1, o2, types.GROUND))
-		return false;
-
-	if (EitherOfType(o1, o2, types.TEXT_BUBBLE))
-		return false;*/
-
-	// to-do: use actual height & width here
-	const w = 6;
-	const h = 6;
-	const collided =  	o1.x <= (o2.x + o2.width) &&
-						o2.x <= (o1.x + o1.height) &&
-						o1.y <= (o2.y + o2.height) &&
-						o2.y <= (o1.y + o1.height);
+	const collided = Collided(o1, o2);
 
 	if (collided)
 	{
 		let shipInvolved = false;
 		let otherObj = {};
+		
 		if (o1 === gShipObject)
 		{
 			shipInvolved = true;
@@ -987,9 +1169,11 @@ let Collided = function(o1, o2)
 		{
 			if (otherObj.type === types.CIRCLE)
 			{	
-				ScoreEvent(scores.eRescuedHostage3);
-				otherObj.alive = false;
+				ShipCollidedWithFallingObject();
+
+				// kill the other obj
 				Explosion(otherObj.x, otherObj.y);
+				otherObj.alive = false;
 			}
 		}
 		else
@@ -1020,8 +1204,7 @@ let HandleObjectPairInteractions = function()
 
 			ASSERT(o1 !== o2);
 			
-			if (Collided(o1, o2))
-				Explosion(o1.x, o1.y);
+			CheckCollision(o1, o2);
 		}
 	}
 }
@@ -1035,18 +1218,15 @@ let DrawText = function ()
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
 
+	gShipObject.velY
+
 	const d = (gShipDistanceFromGround === INT_MAX ? 0 : gShipDistanceFromGround);
 	ctx.fillText("# objects: " + gNumActiveObjects + 
 							", " + gObjects.length + 
-							", " + d.toFixed(0), 
+							", " + d.toFixed(0) +
+							", (" + gShipObject.velX.toFixed(0) + "," + 
+									gShipObject.velY.toFixed(0) + ")", 
 							24, canvas.height - 24);
-
-
-  	ctx.fillStyle = "green";
-	ctx.font = "32px Helvetica";
-	ctx.textAlign = "center";
-	ctx.textBaseline = "bottom";
-	ctx.fillText("SCORE: " + gScore, canvas.width/2, 100);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1078,6 +1258,25 @@ let ClearCanvas = function (delta)
 }
 
 /*---------------------------------------------------------------------------*/
+let Exit = function () {};
+
+/*---------------------------------------------------------------------------*/
+let Init = function () 
+{
+	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
+	gShipObject.setKilledBy(types.CIRCLE);
+	ResetShip();
+
+	NewImageObject(80,10,0,0,0,0,'images/GP.png');
+
+	// start the lower & upper ground objects
+	NewGroundObject(canvas.width, canvas.height - 20, true/*bottom*/, true);
+	NewGroundObject(canvas.width, canvas.height - 400, false/*top*/, true);
+
+	DoExplosions();
+}
+
+/*---------------------------------------------------------------------------*/
 let DoSomeWork = function (delta) 
 {
 	ClearCanvas();
@@ -1087,23 +1286,8 @@ let DoSomeWork = function (delta)
 	DoGame();
   	HandleObjectPairInteractions();
 	DrawText();
+	ShowScoreStats();
 };
-
-/*---------------------------------------------------------------------------*/
-let Init = function () 
-{
-	gShipObject = new Object(types.SHIP,0,0,0,0,0,0,kShipColor,8);
-	gShipObject.setKilledBy(types.CIRCLE);
-	ShipReset();
-
-	// start the lower & upper ground objects
-	NewGroundObject(canvas.width, canvas.height - 20, true, true);
-	NewGroundObject(canvas.width, canvas.height - 400, false, true);
-
-	setInterval(function(){ NewFallingObject(); }, 1000);
-
-	DoExplosions();
-}
 
 /*---------------------------------------------------------------------------*/
 let EventLoop = function () 
@@ -1123,6 +1307,7 @@ let main = function ()
 {
 	Init();
 	EventLoop();
+	Exit();
 } (); 
 
 
