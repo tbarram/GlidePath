@@ -4,8 +4,8 @@
 // Create the canvas
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
-canvas.width = 1200; //512;
-canvas.height = 680; //680;
+canvas.width = 1200; //512; // window.innerWidth
+canvas.height = 680; //680; // window.innerHeight
 document.body.appendChild(canvas);
 
 /*---------------------------------------------------------------------------*/
@@ -18,15 +18,15 @@ function ASSERT(cond, str)
 /*---------------------------------------------------------------------------*/
 // utilities
 let rnd = function(min, max) { return (min + Math.floor(Math.random() * (max - min))); }
-let RandomWidth = function (mL,mR) { return rnd(mL, canvas.width - (mR || mL)); }
-let RandomHeight = function (mT,mB) { return rnd(mT, canvas.height - (mB || mT)); }
+let RandomWidth = function (padL,padR) { return rnd(padL, canvas.width - (padR || padL)); }
+let RandomHeight = function (padT,padB) { return rnd(padT, canvas.height - (padB || padT)); }
 let RGB = function(r, g ,b) { return 'rgb(' + r + ',' + g + ',' + b +')'; }
 let RandomColor = function() { return RGB(rnd(0,255), rnd(0,255), rnd(0,255)); }
 
 /*---------------------------------------------------------------------------*/
 const kMaxNumObjects = 256;
-const kRotateSpeed = 9;
-const kThrustSpeed = 700; //620;
+const kRotateSpeed = 8; // below 8 gets cheesy and too fast
+const kThrustSpeed = 647; //650; //620;
 const kGroundMidpoint = 300;
 const kDistanceGameScoreCutoff = 48; //32;
 const kGroundCollisionBuffer = 1;
@@ -79,6 +79,7 @@ let gScoreEventCounterBest = new Map();
 let gScoreEventCounterBestAllTime = new Map();
 let gPointsByKeepingLowIndex = 1;
 let gPointsByKeepingLow = 0;
+let gSwitch = false;
 
 /*---------------------------------------------------------------------------*/
 const types = 
@@ -415,16 +416,23 @@ Object.prototype.updateAliveState = function()
 /*---------------------------------------------------------------------------*/
 Object.prototype.applyPhysics = function(delta) 
 {
-	if (this.isFixed)
-		return;
+	if (!this.isFixed)
+	{	
+		// apply acceleration to velocity
+		this.velX += (this.accX * delta);
+		this.velY += (this.accY * delta);
 
-	// apply acceleration to velocity
-	this.velX += (this.accX * delta);
-	this.velY += (this.accY * delta);
+		// apply velocity to position
+		this.x += (this.velX * delta);
+		this.y += (this.velY * delta);
+	}
 
-	// apply velocity to position
-	this.x += (this.velX * delta);
-	this.y += (this.velY * delta);
+	// if this object has gravity, reset its acceleration
+	if (this.mass)
+	{
+		this.accX = 0;
+		this.accY = 0;
+	}
 };
 
 /*---------------------------------------------------------------------------*/
@@ -445,9 +453,6 @@ Object.prototype.adjustBounds = function()
 			this.x = 0;
 		else if (this.x < 0)
 			this.x = canvas.width;
-
-		// some horiz friction 
-		this.accX = (this.velX > 0) ? -10 : 10;
 	}
 }
 
@@ -569,13 +574,12 @@ let ScoreEvent = function(ev)
 	
 	let scoreText = ((score > 0 ? "+" : "") + score);
 	
-	// show full text always for now
-	if (true)
-		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")");
-	
 	// if it's the first time then add the !
 	if (gScoreEventCounter.get(ev) === 1)
+	{
+		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")");
 		scoreText += "!";
+	}
 	
 	const color = TextColorForScoreEvent(ev);
 	NewTextBubble(scoreText, gShipObject, color);
@@ -706,10 +710,6 @@ let Explosion = function(x, y)
 /*---------------------------------------------------------------------------*/
 let NewFallingObject = function()
 {
-	const kBeQuiet = true;
-	if (kBeQuiet)
-		return true;
-
 	const x = RandomWidth(10, 240); // random horiz start
 	const accelY = rnd(40, 160);	// random vertical (falling) acceleration
 	const size = rnd(8,20);			// random size for the circle
@@ -744,6 +744,71 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src)
 		//obj.size = (this.height * this.width);
 		obj.ready = true;
 	};
+
+	return obj;
+}
+
+/*---------------------------------------------------------------------------*/
+let NewGravityObject = function(x, y, mass)
+{
+	let obj = NewImageObject(x, y, 0, 0, 0, 0, 'images/monster.png');
+	obj.mass = mass;
+}
+
+/*---------------------------------------------------------------------------*/
+let Distance = function(o1, o2) 
+{
+	var dx = o2.x - o1.x;
+	var dy = o2.y - o1.y;
+	return Math.sqrt((dx * dx) + (dy * dy));
+}
+
+/*---------------------------------------------------------------------------*/
+let Bound = function(val, min, max) 
+{
+	if (val < min) return min;
+	else if (val > max) return max;
+	else return val;
+}
+
+// good setting
+let s1 = {min: 0, max: 120, g: 7, s: false}
+
+let s2 = {min: 0, max: 100, g: 100, s: true}
+
+/*---------------------------------------------------------------------------*/
+// ApplyGravity
+// this applies the gravity acceleration vectors in both directions
+let ApplyGravity = function(o1, o2)
+{
+	if (!(o1.mass && o2.mass))
+		return;
+
+	// choose the setting
+	let s = s2;
+
+	const kMinG = s.min;
+	const kMaxG = s.max;
+	const kG = s.g;
+	const kSquareD = s.s;
+	
+	// calc gravity
+	const d = Distance(o1, o2);
+	const denom = kSquareD ? (d * d) : d;
+	let g = 100 * (kG * o1.mass * o2.mass) / denom;
+	g = Bound(g, kMinG, kMaxG);
+	
+	// calc angle between objects
+	const angleRad = Math.atan2(o2.x - o1.x, o2.y - o1.y);
+	
+	// create the acceleration vector
+	const a = {x: (g * Math.sin(angleRad)), y: (g * Math.cos(angleRad))};
+	
+	// apply them in opposite directions
+	o1.accX += a.x;
+	o1.accY += a.y;
+	o2.accX -= a.x;
+	o2.accY -= a.y;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -934,7 +999,6 @@ let DrawGroundObject = function(obj)
 	ctx.beginPath();
 	ctx.strokeStyle = kLineColor;
 	ctx.lineWidth = 4;
-	ctx.lineJoin = "round";
 	ctx.moveTo(obj.x, obj.y);
 	ctx.lineTo(obj.rightX, obj.rightY);
 	ctx.stroke();
@@ -1075,7 +1139,7 @@ addEventListener("keyup"  , function (e) { delete gKeysDown[e.keyCode]; }, false
 let GetUserInput = function (delta) 
 {
 	gThrusting = false;
-	if (90 in gKeysDown) // 'z'
+	if (90 in gKeysDown || 38 in gKeysDown) // 'z' || up arrow
 	{ 	
 		gThrusting = true;
 		gShipObject.isFixed = false;
@@ -1087,6 +1151,10 @@ let GetUserInput = function (delta)
 		gShipObject.velY -= (gShipAngleCos * thrustSpeed * delta); // vertical thrust
 		gShipObject.velX += (gShipAngleSin * thrustSpeed * delta); // horiz thrust
 	}
+
+	// some horiz friction 
+	if (!gShipObject.mass)
+		gShipObject.accX = (gShipObject.velX > 0) ? -10 : 10;
 
 	if (88 in gKeysDown) 
 	{
@@ -1121,7 +1189,7 @@ let BothOfType = function(o1, o2, type) { return (o1.type === type && o2.type ==
 let ExactlyOneOfType = function(o1, o2, type) { return (o1.type === type ^ o2.type === type); }
 let ExactlyOneOfEachType = function(o1, o2, type1, type2) 
 { 	
-	return (o1.type === type1 && o2.type === type2) ||
+	return 	(o1.type === type1 && o2.type === type2) ||
 			(o1.type === type2 && o2.type === type1); 
 }
 
@@ -1180,6 +1248,7 @@ let CheckCollision = function(o1, o2)
 		{
 			o1.alive = false;
 			o2.alive = false;
+			Explosion(o1.x, o1.y);
 		}
 	}
 
@@ -1192,12 +1261,18 @@ let HandleObjectPairInteractions = function()
 {
 	for (let k = 0; k < (gObjects.length - 1); k++)
 	{
+		if (gSwitch)
+			k = (gObjects.length - k - 1);
+
 		let o1 = gObjects[k];
 		if (!o1.isActive()) 
 			continue;
 		
 		for (let j = (k + 1); j < gObjects.length; j++)
 		{
+			if (gSwitch)
+				j = (gObjects.length - j - 1);
+
 			let o2 = gObjects[j];
 			if (!o2.isActive()) 
 				continue;
@@ -1205,8 +1280,10 @@ let HandleObjectPairInteractions = function()
 			ASSERT(o1 !== o2);
 			
 			CheckCollision(o1, o2);
+			ApplyGravity(o1, o2);
 		}
 	}
+	gSwitch = !gSwitch;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1269,9 +1346,20 @@ let Init = function ()
 
 	NewImageObject(80,10,0,0,0,0,'images/GP.png');
 
-	// start the lower & upper ground objects
-	NewGroundObject(canvas.width, canvas.height - 20, true/*bottom*/, true);
-	NewGroundObject(canvas.width, canvas.height - 400, false/*top*/, true);
+	const kDoGravity = false;
+	if (kDoGravity)
+	{
+		gShipObject.mass = 100;
+		NewGravityObject(RandomWidth(100),RandomHeight(50),30);
+		NewGravityObject(RandomWidth(100),RandomHeight(50),60);
+		NewGravityObject(RandomWidth(100),RandomHeight(50),90);
+	}
+	else
+	{
+		// start the lower & upper ground objects
+		NewGroundObject(canvas.width, canvas.height - 20, true/*bottom*/, true);
+		NewGroundObject(canvas.width, canvas.height - 400, false/*top*/, true);
+	}
 
 	DoExplosions();
 }
@@ -1281,10 +1369,10 @@ let DoSomeWork = function (delta)
 {
 	ClearCanvas();
 	GetUserInput(delta);
-	AnimateAndDraw(delta);
+	HandleObjectPairInteractions();
 	CheckShipWithinLines();
+	AnimateAndDraw(delta);
 	DoGame();
-  	HandleObjectPairInteractions();
 	DrawText();
 	ShowScoreStats();
 };
