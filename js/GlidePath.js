@@ -14,64 +14,106 @@ canvas.height = 680; //680; // window.innerHeight
 document.body.appendChild(canvas);
 
 let vertPos = 40;
-let rightPos = 40;
+let rightPos = 160;
+let rightPosValue = 50;
+let valueVertOffset = 14;
+
+// Gravity slider
 var gravitySlider = document.getElementById("gravity");
 gravitySlider.style.position = "absolute";
 gravitySlider.style.right = rightPos + 'px';
 gravitySlider.style.top = vertPos + 'px';
-vertPos += 20;
+
+var gravity_value = document.getElementById("gravity_value");
+gravity_value.style.position = "absolute";
+gravity_value.style.right = rightPosValue + 'px';
+gravity_value.style.top = (vertPos - valueVertOffset) + 'px';
+gravity_value.innerHTML = "Gravity: " + gravitySlider.value;
+
 gravitySlider.oninput = function() {
-  console.log("gravitySlider: " + this.value);
   sGravitySettings.g = this.value;
+  gravity_value.innerHTML = "Gravity: " + this.value;
 }
 
+// maxG slider
+vertPos += 20;
 var gravityMaxSlider = document.getElementById("maxG");
 gravityMaxSlider.style.position = "absolute";
 gravityMaxSlider.style.right = rightPos + 'px';
 gravityMaxSlider.style.top = vertPos + 'px';
-vertPos += 20;
+
+var maxG_value = document.getElementById("maxG_value");
+maxG_value.style.position = "absolute";
+maxG_value.style.right = rightPosValue + 'px';
+maxG_value.style.top = (vertPos - valueVertOffset) + 'px';
+maxG_value.innerHTML = "MaxG: " + gravityMaxSlider.value;
+
 gravityMaxSlider.oninput = function() {
-  console.log("gravityMinSlider: " + this.value);
-  sGravitySettings.min = this.value;
+  sGravitySettings.max = this.value;
+  maxG_value.innerHTML = "MaxG: " + this.value;
 }
 
+// minG slider
+vertPos += 20;
 var gravityMinSlider = document.getElementById("minG");
 gravityMinSlider.style.position = "absolute";
 gravityMinSlider.style.right = rightPos + 'px';
 gravityMinSlider.style.top = vertPos + 'px';
-vertPos += 20;
+
+var minG_value = document.getElementById("minG_value");
+minG_value.style.position = "absolute";
+minG_value.style.right = rightPosValue + 'px';
+minG_value.style.top = (vertPos - valueVertOffset) + 'px';
+minG_value.innerHTML = "MinG: " + gravityMinSlider.value;
+
 gravityMinSlider.oninput = function() {
-  console.log("gravityMaxSlider: " + this.value);
-  sGravitySettings.max = this.value;
+  sGravitySettings.min = this.value;
+  minG_value.innerHTML = "MinG: " + this.value;
 }
 
+// max velocity slider
+vertPos += 20;
 var maxVelocitySlider = document.getElementById("maxV");
 maxVelocitySlider.style.position = "absolute";
 maxVelocitySlider.style.right = rightPos + 'px';
 maxVelocitySlider.style.top = vertPos + 'px';
-vertPos += 30;
+
+var maxV_value = document.getElementById("maxV_value");
+maxV_value.style.position = "absolute";
+maxV_value.style.right = rightPosValue + 'px';
+maxV_value.style.top = (vertPos - valueVertOffset) + 'px';
+maxV_value.innerHTML = "MaxV: " + maxVelocitySlider.value;
+
 maxVelocitySlider.oninput = function() {
-  console.log("maxVelocitySlider: " + this.value);
   sGravitySettings.maxV = this.value;
+  maxV_value.innerHTML = "MaxV: " + this.value;
 }
 
+// num objects slider
+vertPos += 20;
 var numObjectsSlider = document.getElementById("numObjects");
 numObjectsSlider.style.position = "absolute";
 numObjectsSlider.style.right = rightPos + 'px';
 numObjectsSlider.style.top = vertPos + 'px';
-vertPos += 30;
+
+var numObjects_value = document.getElementById("numObjects_value");
+numObjects_value.style.position = "absolute";
+numObjects_value.style.right = rightPosValue + 'px';
+numObjects_value.style.top = (vertPos - valueVertOffset) + 'px';
+numObjects_value.innerHTML = "Objects: " + numObjectsSlider.value;
+
 numObjectsSlider.oninput = function() {
-  console.log("numObjectsSlider: " + this.value);
   gNumGravityObjects = this.value;
+  numObjects_value.innerHTML = "Objects: " + this.value;
 }
 
+vertPos += 30;
 var button = document.getElementById("button");
 button.style.position = "absolute";
 button.style.right = rightPos + 'px';
 button.style.top = vertPos + 'px';
 vertPos += 20;
 button.onclick = function() {
-	console.log("click ");
 	gResetGravityObjects = true;
 }
 
@@ -268,15 +310,13 @@ class Object
 	updateAliveState() 
 	{
 		// gravity objects never die - maybe they should?
-		if (gResetGravityObjects && this.isGravityObject)
+		if (gResetGravityObjects )
 		{
-			if (this.type === types.SHIP)
+			if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
 			{
-				let v = 0;
-				v = 7;
+				this.alive = false;
+				return
 			}
-			this.alive = false;
-			return
 		}
 
 		// check expireTimeMS
