@@ -6,129 +6,74 @@
 "use strict";
 
 /*---------------------------------------------------------------------------*/
+function ASSERT(cond, str)
+{
+	if (!cond)
+		alert(str || "assert");
+}
+
+/*---------------------------------------------------------------------------*/
 // Create the canvas
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
-canvas.width = 1200; //512; // window.innerWidth
-canvas.height = 680; //680; // window.innerHeight
+
+// using the window values causes glitches, so hardcode
+canvas.width = 1200; //window.innerWidth;
+canvas.height = 680; //window.innerHeight;
 document.body.appendChild(canvas);
 
 let vertPos = 40;
 let rightPos = 160;
 let rightPosValue = 50;
 let valueVertOffset = 14;
-
-// Gravity slider
-var gravitySlider = document.getElementById("gravity");
-gravitySlider.style.position = "absolute";
-gravitySlider.style.right = rightPos + 'px';
-gravitySlider.style.top = vertPos + 'px';
-
-var gravity_value = document.getElementById("gravity_value");
-gravity_value.style.position = "absolute";
-gravity_value.style.right = rightPosValue + 'px';
-gravity_value.style.top = (vertPos - valueVertOffset) + 'px';
-gravity_value.innerHTML = "Gravity: " + gravitySlider.value;
-
-gravitySlider.oninput = function() {
-  sGravitySettings.g = this.value;
-  gravity_value.innerHTML = "Gravity: " + this.value;
-}
-
-// maxG slider
-vertPos += 20;
-var gravityMaxSlider = document.getElementById("maxG");
-gravityMaxSlider.style.position = "absolute";
-gravityMaxSlider.style.right = rightPos + 'px';
-gravityMaxSlider.style.top = vertPos + 'px';
-
-var maxG_value = document.getElementById("maxG_value");
-maxG_value.style.position = "absolute";
-maxG_value.style.right = rightPosValue + 'px';
-maxG_value.style.top = (vertPos - valueVertOffset) + 'px';
-maxG_value.innerHTML = "MaxG: " + gravityMaxSlider.value;
-
-gravityMaxSlider.oninput = function() {
-  sGravitySettings.max = this.value;
-  maxG_value.innerHTML = "MaxG: " + this.value;
-}
-
-// minG slider
-vertPos += 20;
-var gravityMinSlider = document.getElementById("minG");
-gravityMinSlider.style.position = "absolute";
-gravityMinSlider.style.right = rightPos + 'px';
-gravityMinSlider.style.top = vertPos + 'px';
-
-var minG_value = document.getElementById("minG_value");
-minG_value.style.position = "absolute";
-minG_value.style.right = rightPosValue + 'px';
-minG_value.style.top = (vertPos - valueVertOffset) + 'px';
-minG_value.innerHTML = "MinG: " + gravityMinSlider.value;
-
-gravityMinSlider.oninput = function() {
-  sGravitySettings.min = this.value;
-  minG_value.innerHTML = "MinG: " + this.value;
-}
-
-// max velocity slider
-vertPos += 20;
-var maxVelocitySlider = document.getElementById("maxV");
-maxVelocitySlider.style.position = "absolute";
-maxVelocitySlider.style.right = rightPos + 'px';
-maxVelocitySlider.style.top = vertPos + 'px';
-
-var maxV_value = document.getElementById("maxV_value");
-maxV_value.style.position = "absolute";
-maxV_value.style.right = rightPosValue + 'px';
-maxV_value.style.top = (vertPos - valueVertOffset) + 'px';
-maxV_value.innerHTML = "MaxV: " + maxVelocitySlider.value;
-
-maxVelocitySlider.oninput = function() {
-  sGravitySettings.maxV = this.value;
-  maxV_value.innerHTML = "MaxV: " + this.value;
-}
-
-// num objects slider
-vertPos += 20;
-var numObjectsSlider = document.getElementById("numObjects");
-numObjectsSlider.style.position = "absolute";
-numObjectsSlider.style.right = rightPos + 'px';
-numObjectsSlider.style.top = vertPos + 'px';
-
-var numObjects_value = document.getElementById("numObjects_value");
-numObjects_value.style.position = "absolute";
-numObjects_value.style.right = rightPosValue + 'px';
-numObjects_value.style.top = (vertPos - valueVertOffset) + 'px';
-numObjects_value.innerHTML = "Objects: " + numObjectsSlider.value;
-
-numObjectsSlider.oninput = function() {
-  gNumGravityObjects = this.value;
-  numObjects_value.innerHTML = "Objects: " + this.value;
-}
-
-vertPos += 30;
-var button = document.getElementById("button");
-button.style.position = "absolute";
-button.style.right = rightPos + 'px';
-button.style.top = vertPos + 'px';
-vertPos += 20;
-button.onclick = function() {
-	gResetGravityObjects = true;
-}
-
+let sGravitySettings = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 9; //urlParams.get('num');
+let gNumGravityObjects = 7; //urlParams.get('num');
 const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
 const kShipGravityV = 180; //140; // 100
 
 /*---------------------------------------------------------------------------*/
-function ASSERT(cond, str)
+let addSlider = function(sliderID, sliderName, setValFunc, bottomMargin)
 {
-	if (!cond)
-		alert(str || "assert");
+	// slider element
+	var s = document.getElementById(sliderID);
+	s.style.position = "absolute";
+	s.style.right = rightPos + 'px';
+	s.style.top = vertPos + 'px';
+
+	// label for the slider
+	var s_val = document.getElementById(sliderID + "_value");
+	s_val.style.position = "absolute";
+	s_val.style.right = rightPosValue + 'px';
+	s_val.style.top = (vertPos - valueVertOffset) + 'px';
+	s_val.innerHTML = sliderName + ": " + s.value;
+
+	s.oninput = function() {
+	  setValFunc(this.value);
+	  s_val.innerHTML = sliderName + ": " + this.value;
+	}
+
+	vertPos += bottomMargin;
+}
+
+/*---------------------------------------------------------------------------*/
+// add the sliders
+addSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v }, 		20);
+addSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v }, 	20);
+addSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v }, 	20);
+addSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v }, 	20);
+addSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v }, 		30);
+
+/*---------------------------------------------------------------------------*/
+// add the button
+var button = document.getElementById("button");
+button.style.position = "absolute";
+button.style.right = rightPosValue + 'px';
+button.style.top = vertPos + 'px';
+button.onclick = function() {
+	gResetGravityObjects = true;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -309,7 +254,6 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	updateAliveState() 
 	{
-		// gravity objects never die - maybe they should?
 		if (gResetGravityObjects )
 		{
 			if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
@@ -318,6 +262,10 @@ class Object
 				return
 			}
 		}
+
+				// gravity objects never die - maybe they should?
+		if (this.isGravityObject)
+			return;
 
 		// check expireTimeMS
 		const expired = (this.expireTimeMS && 
@@ -358,6 +306,9 @@ class Object
 
 			if (sGravitySettings.maxV > 0)
 			{
+				if (sGravitySettings.maxV < 400)
+					sGravitySettings.maxV = 400;
+
 				this.velX = Bound(this.velX, sGravitySettings.maxV);
 				this.velY = Bound(this.velY, sGravitySettings.maxV);
 			}
@@ -974,7 +925,7 @@ const s141 = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
 const s141_copy_its_a_good_one_w_17_objects = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
 const s22 = {min: 20, max: 1000, g: 500,  shipG: 0, maxV: 450}; 
 
-const sGravitySettings = s141_copy_its_a_good_one_w_17_objects; 
+sGravitySettings = s141_copy_its_a_good_one_w_17_objects; 
 
 /*---------------------------------------------------------------------------*/
 // ApplyGravity
@@ -999,7 +950,7 @@ let ApplyGravity = function(o1, o2)
 	// bound it (these bounds have a huge affect on the systen)
 	g = Bound(g, kMinG, kMaxG);
 	
-	// angle between the objects
+	// get angle between the objects
 	const dx = (o2.x - o1.x);
 	const dy = (o2.y - o1.y);
 	const angle = Math.atan2(dx, dy);
@@ -1396,6 +1347,13 @@ let gKeysDown = {};
 addEventListener("keydown", function (e) { gKeysDown[e.keyCode] = true; }, false);
 addEventListener("keyup"  , function (e) { delete gKeysDown[e.keyCode]; }, false);
 
+const key_Z = 90;
+const key_X = 88;
+const key_UpArrow = 38;
+const key_LeftArrow = 37;
+const key_RightArrow = 39;
+let KeyDown = function(key) { return key in gKeysDown; }
+
 /*---------------------------------------------------------------------------*/
 let GetUserInput = function (deltaMS) 
 {
@@ -1403,7 +1361,7 @@ let GetUserInput = function (deltaMS)
 	gThrusting = false;
 
 	// see if we're thrusting - 'z' || up arrow
-	if (90 in gKeysDown || 38 in gKeysDown) 
+	if (KeyDown(key_Z) || KeyDown(key_UpArrow)) 
 	{ 	
 		gThrusting = true;
 		gShipObject.isFixed = false;
@@ -1418,7 +1376,7 @@ let GetUserInput = function (deltaMS)
 		gShipObject.accX = (gShipObject.velX > 0) ? -10 : 10;
 
 	// check shoot key
-	if (88 in gKeysDown) 
+	if (KeyDown(key_X)) 
 	{
 		if (gNowMS - gLastShootMS > 50)
 		{
@@ -1428,16 +1386,15 @@ let GetUserInput = function (deltaMS)
 	}
 
 	// check arrow keys for rotation
-	const rotateDir = 37 in gKeysDown ? -1 : 39 in gKeysDown ? 1 : 0;
+	const rotateDir = KeyDown(key_LeftArrow) ? -1 : KeyDown(key_RightArrow) ? 1 : 0;
+	const isRotating = (rotateDir !== 0);
 
 	gShipAngle += (kRotateSpeed * delta * rotateDir);
 
-	const rotating = (rotateDir !== 0);
-
-	if (rotating)
+	if (isRotating)
 		CalcSinCosForShip();
 
-	CheckRotation(rotating);
+	CheckRotation(isRotating);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1513,15 +1470,21 @@ let CheckCollision = function(o1, o2)
 }
 
 /*---------------------------------------------------------------------------*/
+let swap = function(a,b)
+{
+	const tmp = a;
+    a = b;
+    b = tmp;
+}
+
+/*---------------------------------------------------------------------------*/
 let shuffleArray = function(a) 
 {
 	// wow - this is very expensive - calls rnd a lot, every frame
     for (let i = (a.length - 1); i > 0; i--) 
     {
         const j = Math.floor(Math.random() * (i + 1));
-        const tmp = a[i];
-        a[i] = a[j];
-        a[j] = tmp;
+        swap(a[i],a[j]);
     }
     return a;
 }
@@ -1539,7 +1502,7 @@ let DoObjectPairInteractions = function()
 {
 	const len = gObjects.length;
 
-	if (len < kMaxNumObjects)
+	if (len <= kMaxNumObjects)
 		for (var i = 0; i < len; ++i) 
 			gRandomIntsArray[i] = i;
 
@@ -1616,9 +1579,7 @@ let AnimateAndDrawObjects = function (deltaMS)
   	if (gResetGravityObjects)
   	{
   		gResetGravityObjects = false;
-  		for (let i = 0; i < gNumGravityObjects; i++)
-			NewGravityObject(RandomWidth(100), RandomHeight(50), sGravitySettings.rnd ? rnd(20,60) : 30);
-
+  		CreateGravityObjects();
 		ResetShip();
   	}
 }
@@ -1645,37 +1606,43 @@ let GravityEnabled = function()
 }
 
 /*---------------------------------------------------------------------------*/
+let CreateGravityObjects = function()
+{
+	for (let i = 0; i < gNumGravityObjects; i++)
+		NewGravityObject(RandomWidth(100), RandomHeight(50), sGravitySettings.rnd ? rnd(20,60) : 30);
+}
+
+/*---------------------------------------------------------------------------*/
 let Exit = function () {};
 
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
+	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
 	gShipObject.setKilledBy(types.CIRCLE);
 	ResetShip();
 
+	// logo pic
+	let logoPos = {x: 80, y: 10};
+	if (GravityEnabled())
+		logoPos = {x: canvas.width - 280, y: canvas.height - 300};
+
+	NewImageObject(logoPos.x,logoPos.y,0,0,0,0,'images/GP.png');			
+
 	if (GravityEnabled())
 	{
-		// logo fixed in bottom right
-		NewImageObject(canvas.width - 280, canvas.height - 300,0,0,0,0,'images/GP.png');
-
 		if (sGravitySettings.shipG)
 			gShipObject.mass = sGravitySettings.shipG;
 
-		for (let i = 0; i < gNumGravityObjects; i++)
-			NewGravityObject(RandomWidth(100), RandomHeight(50), sGravitySettings.rnd ? rnd(20,60) : 30);
+		CreateGravityObjects();
 	}
 	else
 	{
-		// logo fixed in upper left
-		NewImageObject(80,10,0,0,0,0,'images/GP.png');
-
 		// start the lower & upper ground objects
 		NewGroundObject(canvas.width, canvas.height - 20, kBottom, true);
 		NewGroundObject(canvas.width, canvas.height - 400, kTop, true);
 	}
-
-	//DoExplosions();
 }
 
 /*---------------------------------------------------------------------------*/
