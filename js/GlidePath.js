@@ -1470,14 +1470,6 @@ let CheckCollision = function(o1, o2)
 }
 
 /*---------------------------------------------------------------------------*/
-let swap = function(a,b)
-{
-	const tmp = a;
-    a = b;
-    b = tmp;
-}
-
-/*---------------------------------------------------------------------------*/
 let shuffleArray = function(a) 
 {
 	// wow - this is very expensive - calls rnd a lot, every frame
