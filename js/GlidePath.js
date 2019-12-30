@@ -218,6 +218,12 @@ class Object
 	collidesWith(obj) { return this.killedByBitmask & obj.type; }
 	hasGravity() { return this.mass; }
 	isGravityObject() { return this.isGravityObject; }
+	addMinimap(color)
+	{
+		let minimapObj = new Object(types.MINIMAP);
+		minimapObj.parent = this;
+		minimapObj.minimapColor = color;
+	}
 
 	/*---------------------------------------------------------------------------*/
 	draw() 
@@ -246,7 +252,7 @@ class Object
 				DrawTextObject(this);
 				break;
 			case types.MINIMAP:
-				DrawCircle(TranslateForMinimap(this.parent), 1, "yellow");
+				DrawCircle(TranslateForMinimap(this.parent), 1, this.minimapColor);
 				break;
 		}
 	}
@@ -263,7 +269,7 @@ class Object
 			}
 		}
 
-				// gravity objects never die - maybe they should?
+		// gravity objects never die - maybe they should?
 		if (this.isGravityObject)
 			return;
 
@@ -304,13 +310,14 @@ class Object
 			this.velX += (this.accX * delta);
 			this.velY += (this.accY * delta);
 
-			if (sGravitySettings.maxV > 0)
+			let maxV = sGravitySettings.maxV;
+			if (maxV > 0)
 			{
-				if (sGravitySettings.maxV < 400)
-					sGravitySettings.maxV = 400;
+				if (maxV < 400)
+					maxV = 400;
 
-				this.velX = Bound(this.velX, sGravitySettings.maxV);
-				this.velY = Bound(this.velY, sGravitySettings.maxV);
+				this.velX = Bound(this.velX, maxV);
+				this.velY = Bound(this.velY, maxV);
 			}
 
 			// apply velocity to position
@@ -574,7 +581,7 @@ let NewTextBubble = function(text, pos, color, first)
 	const y = pos.y - 150;
 	const p = {x: pos.x + (gSwitch ? 80 : -80), y: pos.y - 80};
 	const v = {x: rnd(-30,30), y: rnd(-50,-20)};
-	const a = {x:0,y:0}; //{x: rnd(-30,30), y: rnd(-30,-10)};
+	const a = {x:0, y:0}; //{x: rnd(-30,30), y: rnd(-30,-10)};
 	let obj = new Object(types.TEXT_BUBBLE, p.x, p.y, v.x, v.y, a.x, a.y, color, 0);
 	obj.text = text;
 	obj.setLifetime(first ? 3000 : 1000);
@@ -774,22 +781,22 @@ let Velocity = function(speed, angle)
 }
 
 /*---------------------------------------------------------------------------*/
-let ShootBullet = function(x, y, a)
+let ShootBullet = function(p, a)
 {
 	const kBulletSpeed = 400;
 	const v = Velocity(kBulletSpeed, a);
-	let bullet = new Object(types.BULLET, x, y, v.x, v.y, 0, 0, 0, 4);
+	let bullet = new Object(types.BULLET, p.x, p.y, v.x, v.y, 0, 0, 0, 4);
 	bullet.setLifetime(4000);
 }
 
 /*---------------------------------------------------------------------------*/
-let ShootBullets = function(x, y)
+let ShootBullets = function(p)
 {
 	const kOffset = (M_PI_4 * 0.27);
 
-	ShootBullet(x, y, gShipAngle - kOffset);
-	ShootBullet(x, y, gShipAngle);
-	ShootBullet(x, y, gShipAngle + kOffset);
+	ShootBullet(p, gShipAngle - kOffset);
+	ShootBullet(p, gShipAngle);
+	ShootBullet(p, gShipAngle + kOffset);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -861,11 +868,8 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src, minimap)
 	obj.image.onload = function () { obj.ready = true; };
 
 	// could move this into Object constructor
-	//if (minimap)
-	{
-		let minimapObj = new Object(types.MINIMAP);
-		minimapObj.parent = obj;
-	}
+	if (minimap)
+		obj.addMinimap("yellow");
 
 	return obj;
 }
@@ -925,7 +929,7 @@ const s141 = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
 const s141_copy_its_a_good_one_w_17_objects = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
 const s22 = {min: 20, max: 1000, g: 500,  shipG: 0, maxV: 450}; 
 
-sGravitySettings = s141_copy_its_a_good_one_w_17_objects; 
+sGravitySettings = s19; 
 
 /*---------------------------------------------------------------------------*/
 // ApplyGravity
@@ -1381,7 +1385,7 @@ let GetUserInput = function (deltaMS)
 		if (gNowMS - gLastShootMS > 50)
 		{
 			gLastShootMS = gNowMS;
-			ShootBullets(gShipObject.x, gShipObject.y);
+			ShootBullets(gShipObject);
 		}
 	}
 
@@ -1500,6 +1504,8 @@ let DoObjectPairInteractions = function()
 		for (var i = 0; i < len; ++i) 
 			gRandomIntsArray[i] = i;
 
+	// actually i dont think this matters since the mass & position
+	// dont change during this loop
 	gRandomIntsArray = shuffleArray(gRandomIntsArray);
 
 	for (let k1 = 0; k1 < (len - 1); k1++)
@@ -1615,6 +1621,7 @@ let Init = function ()
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
 	gShipObject.setKilledBy(types.CIRCLE);
+	gShipObject.addMinimap(kShipColor);
 	ResetShip();
 
 	// logo pic
