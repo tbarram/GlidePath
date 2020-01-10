@@ -1,4 +1,12 @@
 
+/*---------------------------------------------------------------------------
+
+Glide Path
+Ted Barram
+Copyright 2020
+
+---------------------------------------------------------------------------*/
+
 
 // glide_path namespace
 (function glide_path() { 
@@ -22,58 +30,158 @@ canvas.width = 1200; //window.innerWidth;
 canvas.height = 680; //window.innerHeight;
 document.body.appendChild(canvas);
 
-let vertPos = 40;
-let rightPos = 160;
-let rightPosValue = 50;
-let valueVertOffset = 14;
+// slider positions
+let gVertPos = 40;
+const kRightPos = 160;
+const kRightPosValue = 50;
+const kValueVertOffset = 14;
 let sGravitySettings = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7; //urlParams.get('num');
 const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
-const kShipGravityV = 180; //140; // 100
+const kShipGravityV = 140; // 100
 
 /*---------------------------------------------------------------------------*/
-let addSlider = function(sliderID, sliderName, setValFunc, bottomMargin)
+let setPosition = function(el, right, vert)
 {
-	// slider element
-	var s = document.getElementById(sliderID);
-	s.style.position = "absolute";
-	s.style.right = rightPos + 'px';
-	s.style.top = vertPos + 'px';
-
-	// label for the slider
-	var s_val = document.getElementById(sliderID + "_value");
-	s_val.style.position = "absolute";
-	s_val.style.right = rightPosValue + 'px';
-	s_val.style.top = (vertPos - valueVertOffset) + 'px';
-	s_val.innerHTML = sliderName + ": " + s.value;
-
-	s.oninput = function() {
-	  setValFunc(this.value);
-	  s_val.innerHTML = sliderName + ": " + this.value;
-	}
-
-	vertPos += bottomMargin;
+	el.style.position = "absolute";
+	el.style.right = right + 'px';
+	el.style.top = vert + 'px';
 }
 
 /*---------------------------------------------------------------------------*/
-// add the sliders
-addSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v }, 		20);
-addSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v }, 	20);
-addSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v }, 	20);
-addSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v }, 	20);
-addSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v }, 		30);
+// util function for adding a slider element
+let addSlider = function(id, name, setValFunc, bottomMargin)
+{
+	// slider element
+	let s = document.getElementById(id);
+	setPosition(s, kRightPos, gVertPos);
+
+	// label element for the slider
+	const labelElementName = (id + "_value"); // convention in HTML
+	let s_val = document.getElementById(labelElementName);
+	setPosition(s_val, kRightPosValue, (gVertPos - kValueVertOffset));
+
+	// fixme - make the defaults set in JS instead of from the HTML
+	s_val.innerHTML = name + ": " + s.value;
+
+	// install the setValFunc callback as the action when slider moves
+	s.oninput = function() 
+	{
+	  	setValFunc(this.value); 					// update data model
+	  	s_val.innerHTML = name + ": " + this.value; // update UI
+	}
+
+	gVertPos += bottomMargin;
+}
 
 /*---------------------------------------------------------------------------*/
-// add the button
-var button = document.getElementById("button");
-button.style.position = "absolute";
-button.style.right = rightPosValue + 'px';
-button.style.top = vertPos + 'px';
-button.onclick = function() {
-	gResetGravityObjects = true;
+function initElements() 
+{
+	// add the sliders
+	addSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	20);
+	addSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	20);
+	addSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	20);
+	addSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	20);
+	addSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	30);
+
+	// add the Reset button
+	var button = document.getElementById("button");
+	setPosition(button, kRightPosValue, gVertPos);
+	button.onclick = function() {
+		gResetGravityObjects = true;
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+function getCurvePoints(pts) 
+{  
+    const tension = 0.5;
+    const isClosed = false; 
+    const numSegments = 16;
+
+    var _pts = [],    			// cloned array
+    	res = [], 				// modified array
+        x, y,           		// our x,y coords
+        t1x, t2x, t1y, t2y, 	// tension vectors
+        c1, c2, c3, c4,     	// cardinal points
+        st, t, i;       		// steps based on numSegments
+
+    // clone array so we don't change the original
+    _pts = pts.slice(0);
+
+    // The algorithm require a previous and next point to the actual point array.
+    // Check if we will draw closed or open curve.
+    // If closed, copy end points to beginning and first points to end
+    // If open, duplicate first points to beginning, end points to end
+    if (isClosed) {
+        _pts.unshift(pts[pts.length - 1]);
+        _pts.unshift(pts[pts.length - 2]);
+        _pts.unshift(pts[pts.length - 1]);
+        _pts.unshift(pts[pts.length - 2]);
+        _pts.push(pts[0]);
+        _pts.push(pts[1]);
+    }
+    else {
+        _pts.unshift(pts[1]);   //copy 1. point and insert at beginning
+        _pts.unshift(pts[0]);
+        _pts.push(pts[pts.length - 2]); //copy last point and append
+        _pts.push(pts[pts.length - 1]);
+    }
+
+    // ok, lets start..
+
+    // 1. loop goes through point array
+    // 2. loop goes through each segment between the 2 pts + 1e point before and after
+    for (i = 2; i < (_pts.length - 4); i += 2) 
+    {
+        for (t = 0; t <= numSegments; t++) 
+        {
+            // calc tension vectors
+            t1x = (_pts[i+2] - _pts[i-2]) * tension;
+            t2x = (_pts[i+4] - _pts[i  ]) * tension;
+
+            t1y = (_pts[i+3] - _pts[i-1]) * tension;
+            t2y = (_pts[i+5] - _pts[i+1]) * tension;
+
+            // calc step
+            st = t / numSegments;
+
+            // calc cardinals
+            c1 =   2 * Math.pow(st, 3)  - 3 * Math.pow(st, 2) + 1; 
+            c2 = -(2 * Math.pow(st, 3)) + 3 * Math.pow(st, 2); 
+            c3 =       Math.pow(st, 3)  - 2 * Math.pow(st, 2) + st; 
+            c4 =       Math.pow(st, 3)  -     Math.pow(st, 2);
+
+            // calc x and y cords with common control vectors
+            x = c1 * _pts[i]    + c2 * _pts[i+2] + c3 * t1x + c4 * t2x;
+            y = c1 * _pts[i+1]  + c2 * _pts[i+3] + c3 * t1y + c4 * t2y;
+
+            //store points in array
+            res.push(x);
+            res.push(y);
+        }
+    }
+
+    return res;
+}
+
+/*---------------------------------------------------------------------------*/
+function drawLines(ctx, pts) 
+{
+    ctx.moveTo(pts[0], pts[1]);
+    for (let i = 2; i < pts.length - 1; i += 2) 
+    	ctx.lineTo(pts[i], pts[i+1]);
+}
+
+/*---------------------------------------------------------------------------*/
+function drawCurve(ctx, ptsa) 
+{
+    ctx.beginPath();
+    drawLines(ctx, getCurvePoints(ptsa));
+    ctx.stroke();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -116,11 +224,11 @@ const M_PI_4 = (M_PI / 4);
 const M_PI_8 = (M_PI / 8);
 const M_3PI_8 = (3 * M_PI / 8);
 const INT_MAX = 1000000;
+const kTrailSize = 256;
 
 /*---------------------------------------------------------------------------*/
 let gNowMS = Date.now();
 let gObjects = [];
-let gRandomIntsArray = [];
 let gGroundObjects = [];
 let gShipObject = {};
 let gShipDistanceFromGround = 0;
@@ -139,7 +247,7 @@ let gBlink = false;
 let gNumActiveObjects = 0;
 let gLastShootMS = 0;
 let gGameStartTimeMS = 0;
-let gGameState = eInactive;
+let gGameState = gGravityGameActive ? eInactive : eWaitingForStart;
 let gScore = 0;
 let gScoreBestAllTime = 0;
 let gScoreEventCounter = new Map();
@@ -199,6 +307,7 @@ class Object
 		this.accY = accY;
 		this.color = color;
 		this.size = size;
+		this.trail = [];
 
 		this.width = size;
 		this.height = size;
@@ -231,7 +340,7 @@ class Object
 		switch (this.type)
 		{
 			case types.IMAGE:
-				ctx.drawImage(this.image, this.x, this.y);
+				ctx.drawImage(this.image, this.x - this.width/2, this.y - this.height/2);
 				break;
 			case types.CIRCLE:
 				DrawCircle(this);
@@ -252,7 +361,7 @@ class Object
 				DrawTextObject(this);
 				break;
 			case types.MINIMAP:
-				DrawCircle(TranslateForMinimap(this.parent), 1, this.minimapColor);
+				DrawCircle(GetMinimapPosition(this.parent), 1, this.minimapColor);
 				break;
 		}
 	}
@@ -323,10 +432,15 @@ class Object
 			// apply velocity to position
 			this.x += (this.velX * delta);
 			this.y += (this.velY * delta);
+
+			if (this.hasTrail)
+				this.drawTrail();
 		}
 
 		// if this object has gravity, reset its acceleration -
 		// it will get accumulated in ApplyGravity by the other objects
+		// acceleration is the ONLY changebale force
+		// 
 		if (this.hasGravity())
 			this.accX = this.accY = 0;
 	}
@@ -350,6 +464,24 @@ class Object
 			else if (this.x < 0)
 				this.x = canvas.width;
 		}
+	}
+
+	/*---------------------------------------------------------------------------*/
+	drawTrail()
+	{
+		// add the current position, and draw the trail
+
+		// remove the front 2 entries and shift all 
+		// entries down 2 (each point is 2 entries)
+		this.trail.shift();
+		this.trail.shift();
+
+		// add the center point to the end of the trail array
+		this.trail[(kTrailSize * 2)] 	 = this.x;
+		this.trail[(kTrailSize * 2) + 1] = this.y;
+
+		// draw the trail
+		drawCurve(ctx, this.trail);
 	}
 }
 
@@ -412,15 +544,15 @@ function Rotate(p, c, sin, cos)
 }
 
 /*---------------------------------------------------------------------------*/
-let DrawPolygon = function (vs, color) 
+let DrawPolygon = function (verts, color) 
 {
 	ctx.beginPath();
 	ctx.fillStyle = color;
 	ctx.shadowBlur = DoShipShadow() ? 20 : 0; 
 	ctx.shadowColor = "white";
-	ctx.moveTo(vs[0].x, vs[0].y);
-	for(let i = 1; i < vs.length; i++)
-		ctx.lineTo(vs[i].x, vs[i].y);
+	ctx.moveTo(verts[0].x, verts[0].y);
+	for(let i = 1; i < verts.length; i++)
+		ctx.lineTo(verts[i].x, verts[i].y);
 	ctx.closePath();
 	ctx.fill();
 
@@ -428,20 +560,20 @@ let DrawPolygon = function (vs, color)
 }
 
 /*---------------------------------------------------------------------------*/
-let RotateAndDraw = function (vs, pos, color) 
+let RotateAndDraw = function (verts, pos, color) 
 {
-	// rotate the vertices and store in rv
-	let rv = []; 
-	for (let i = 0; i < vs.length; i++)
+	// rotate the vertices and store in rvs
+	let rvs = []; 
+	for (let i = 0; i < verts.length; i++)
 	{
-		let pt = Rotate(vs[i], pos, gShipAngleSin, gShipAngleCos);
-		rv.push(pt);
+		let pt = Rotate(verts[i], pos, gShipAngleSin, gShipAngleCos);
+		rvs.push(pt);
 	}
 
-	DrawPolygon(rv, color);
+	DrawPolygon(rvs, color);
 
 	// return rotated vertices (only used for shipObject)
-	return rv; 	
+	return rvs; 	
 }
 
 /*---------------------------------------------------------------------------*/
@@ -506,16 +638,17 @@ let ResetShip = function ()
 }
 
 /*---------------------------------------------------------------------------*/
+const kBaseWidth = 16;
+const kHeight = 8;
+const kHalfBaseWidth = (kBaseWidth / 2);
+const kHalfHeight = kHeight / 2;
+const kCenterIndent = 4;
+const kThrustWidth = ((kBaseWidth / 4) - 1);
+const kThrustHeight = 8;
+
+/*---------------------------------------------------------------------------*/
 let DrawShip = function (obj) 
 {
-	const kBaseWidth = 16;
-	const kHeight = 8;
-	const kHalfBaseWidth = (kBaseWidth / 2);
-	const kHalfHeight = kHeight / 2;
-	const kCenterIndent = 4;
-	const kThrustWidth = ((kBaseWidth / 4) - 1);
-	const kThrustHeight = 8;
-
 	let ship = [];
 	ship.push({x: (obj.x - kHalfBaseWidth), y: (obj.y + kHalfHeight)}); // bottomL
 	ship.push({x: (obj.x), y: (obj.y + kHalfHeight - kCenterIndent)}); // bottomC
@@ -698,10 +831,7 @@ let ScoreEvent = function(ev)
 	// if it's the first time add extra text
 	const firstTime = !!(gScoreEventCounter.get(ev) === 1);
 	if (firstTime)
-	{
-		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")");
-		scoreText += "!";
-	}
+		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")!");
 	
 	const color = TextColorForScoreEvent(ev);
 	NewTextBubble(scoreText, gShipObject, color, firstTime);
@@ -801,14 +931,14 @@ let ShootBullets = function(p)
 
 /*---------------------------------------------------------------------------*/
 // do some random explosions
-let DoExplosions = function () 
+let DoExplosions = function() 
 {
 	for (let i = 0; i < 12; i++)
-		Explosion(RandomWidth(20), RandomHeight(20));
+		Explosion({x: RandomWidth(20), y: RandomHeight(20)});
 }
 
 /*---------------------------------------------------------------------------*/
-let Explosion = function(x, y)
+let Explosion = function(p)
 {
 	const kNumFrags = rnd(6, 12);
 	const kAngleInc = (2 * M_PI / kNumFrags);
@@ -827,7 +957,7 @@ let Explosion = function(x, y)
 		const accX = rnd(0, kNumFrags); // minimal friction
 		const accY = rnd(0, kNumFrags) * 16; // some gravity
 		
-		let obj = new Object(types.FRAGMENT, x, y, v.x, v.y, accX, accY, 0, 0);
+		let obj = new Object(types.FRAGMENT, p.x, p.y, v.x, v.y, accX, accY, 0, 0);
 		obj.setLifetime(rnd(2600, 6000));
 	}
 }
@@ -850,7 +980,7 @@ let NewFallingObject = function()
 		const elapsedGameTimeMS = (gNowMS - gGameStartTimeMS);
 		const avgNextMS = 400 + 4000 * (1 - ( 1 / elapsedGameTimeMS));
 		//const nextObjectMS = rnd(600, 1000);
-		setTimeout(function(){ NewFallingObject(); }, 3500);
+		setTimeout(() => NewFallingObject(), 3500);
 	}
 }
 
@@ -860,12 +990,14 @@ let NewImageObject = function(x, y, velX, velY, accX, accY, src, minimap)
 	let obj = new Object(types.IMAGE, x, y, velX, velY, accX, accY, 0, 0);
 	obj.image = new Image();
 	obj.image.src = src; 
-	obj.width = obj.image.width;
-	obj.height = obj.image.height;
 
 	// start out as not ready until the img is loaded
 	obj.ready = false;
-	obj.image.onload = function () { obj.ready = true; };
+	obj.image.onload = function () { 
+		obj.width = obj.image.width;
+		obj.height = obj.image.height;
+		obj.ready = true; 
+	};
 
 	// could move this into Object constructor
 	if (minimap)
@@ -880,6 +1012,7 @@ let NewGravityObject = function(x, y, mass)
 	let obj = NewImageObject(x, y, 0, 0, 0, 0, 'images/icons8-bang-16.png',true/*minmimap*/);
 	obj.mass = mass;
 	obj.isGravityObject = true;
+	obj.hasTrail = true;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -961,7 +1094,7 @@ let ApplyGravity = function(o1, o2)
 
 	// create the acceleration vector
 	const a = {	x: (g * Math.sin(angle)), 
-				y: (g * Math.cos(angle)) };
+				y: (g * Math.cos(angle))};
 	
 	// apply it on each object in opposite directions
 
@@ -1010,11 +1143,11 @@ let DrawMiniMap = function ()
 /*---------------------------------------------------------------------------*/
 let Interpolate = function(a1, a2, a, b1, b2)
 {
-	return b1 + (((a - a1) * (b2 - b1)) / (a2 - a1));
+	return (b1 + (((a - a1) * (b2 - b1)) / (a2 - a1)));
 }
 
 /*---------------------------------------------------------------------------*/
-let TranslateForMinimap = function(p)
+let GetMinimapPosition = function(p)
 {
 	const x = Interpolate(0, canvas.width, p.x, kMiniMapTopLeftCorner.mX, kMiniMapTopLeftCorner.mX + kMinimapWidth);
 	const y = Interpolate(canvas.height, 0, p.y, kMiniMapTopLeftCorner.mY + kMinimapHeight, kMiniMapTopLeftCorner.mY);
@@ -1056,7 +1189,7 @@ let DoGame = function()
 			gGameState = eStarted;
 			gGameStartTimeMS = gNowMS;
 			gTotalRotateTimeMS = 0;
-			setTimeout(function(){ NewFallingObject(); }, 800);
+			setTimeout(() => NewFallingObject(), 800);
 			break;
 		}
 
@@ -1119,7 +1252,7 @@ let CheckShipWithinLines = function()
 
 		if (CheckShipWithSingleGroundObject(g))
 		{
-			Explosion(gShipObject.x, gShipObject.y);
+			Explosion(gShipObject);
 			ResetShip();
 			break;
 		}
@@ -1127,15 +1260,11 @@ let CheckShipWithinLines = function()
 }
 
 /*---------------------------------------------------------------------------*/
-let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
+let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, p)
 {
-	// since this is only ever called with a ship vertex as the obj,
-	// call it ship for clarity
-	let ship = obj;
-
 	// only check the segment we're in since we're checking vertical distance
 	// TODO: can we optimize this so we don't have to iterate over all ground objects?
-	if (ship.x < leftX || ship.x > rightX)
+	if (p.x < leftX || p.x > rightX)
 		return INT_MAX;
 	
 	// avoid divide by zero
@@ -1150,17 +1279,17 @@ let VerticalDistanceToLine = function(rightX, rightY, leftX, leftY, obj)
 	
 	// now that we have the equation of the line (y = mx + b), find the 
 	// y value of the point on the line with the x-coord of the ship 
-	const y = ((m * ship.x) + b);
+	const y = ((m * p.x) + b);
 	
 	// now the distance is just the distance between the y coordinates
-	const d = (y - ship.y);
+	const d = (y - p.y);
 	return d;
 }
 
 /*---------------------------------------------------------------------------*/
-let IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
+let IsUnderLine = function(rightX, rightY, leftX, leftY, p)
 { 
-	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
+	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, p);
 
 	// since we only ever call this with the SHIP object, we can set this here
 	if (d > 0 && d < INT_MAX)
@@ -1170,19 +1299,19 @@ let IsUnderLine = function(rightX, rightY, leftX, leftY, obj)
 }
 
 /*---------------------------------------------------------------------------*/
-let IsAboveLine = function(rightX, rightY, leftX, leftY, obj)
+let IsAboveLine = function(rightX, rightY, leftX, leftY, p)
 {
-	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, obj);
+	const d = VerticalDistanceToLine(rightX, rightY, leftX, leftY, p);
 	return (d > kGroundCollisionBuffer && d < INT_MAX);
 }
 
 /*---------------------------------------------------------------------------*/
-let IsOutsideLine = function(isBottom, rightX, rightY, leftX, leftY, obj)
+let IsOutsideLine = function(isBottom, rightX, rightY, leftX, leftY, p)
 {
 	if (isBottom)
-		return IsUnderLine(rightX, rightY, leftX, leftY, obj);
+		return IsUnderLine(rightX, rightY, leftX, leftY, p);
 	else
-		return IsAboveLine(rightX, rightY, leftX, leftY, obj);
+		return IsAboveLine(rightX, rightY, leftX, leftY, p);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1216,7 +1345,7 @@ let DrawGroundObject = function(obj)
 	
 	ctx.beginPath();
 	ctx.strokeStyle = kLineColor;
-	ctx.lineWidth = 4;
+	ctx.lineWidth = 2;
 	ctx.moveTo(obj.x, obj.y);
 	ctx.lineTo(obj.rightX, obj.rightY);
 	ctx.stroke();
@@ -1348,14 +1477,14 @@ let CheckRotation = function (isRotating)
 /*---------------------------------------------------------------------------*/
 // keyboard input
 let gKeysDown = {};
-addEventListener("keydown", function (e) { gKeysDown[e.keyCode] = true; }, false);
-addEventListener("keyup"  , function (e) { delete gKeysDown[e.keyCode]; }, false);
+addEventListener("keydown", (e) => { gKeysDown[e.keyCode] = true; }, false);
+addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; }, false);
 
-const key_Z = 90;
-const key_X = 88;
-const key_UpArrow = 38;
-const key_LeftArrow = 37;
-const key_RightArrow = 39;
+const _Z_ = 90;
+const _X_ = 88;
+const _UpArrow_ = 38;
+const _LeftArrow_ = 37;
+const _RightArrow_ = 39;
 let KeyDown = function(key) { return key in gKeysDown; }
 
 /*---------------------------------------------------------------------------*/
@@ -1365,7 +1494,7 @@ let GetUserInput = function (deltaMS)
 	gThrusting = false;
 
 	// see if we're thrusting - 'z' || up arrow
-	if (KeyDown(key_Z) || KeyDown(key_UpArrow)) 
+	if (KeyDown(_Z_) || KeyDown(_UpArrow_)) 
 	{ 	
 		gThrusting = true;
 		gShipObject.isFixed = false;
@@ -1376,11 +1505,12 @@ let GetUserInput = function (deltaMS)
 	}
 
 	// some horiz friction 
+	// TODO: move this
 	if (!gShipObject.hasGravity())
 		gShipObject.accX = (gShipObject.velX > 0) ? -10 : 10;
 
 	// check shoot key
-	if (KeyDown(key_X)) 
+	if (KeyDown(_X_)) 
 	{
 		if (gNowMS - gLastShootMS > 50)
 		{
@@ -1390,7 +1520,7 @@ let GetUserInput = function (deltaMS)
 	}
 
 	// check arrow keys for rotation
-	const rotateDir = KeyDown(key_LeftArrow) ? -1 : KeyDown(key_RightArrow) ? 1 : 0;
+	const rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
 	const isRotating = (rotateDir !== 0);
 
 	gShipAngle += (kRotateSpeed * delta * rotateDir);
@@ -1458,7 +1588,7 @@ let CheckCollision = function(o1, o2)
 				ShipCollidedWithFallingObject();
 
 				// kill the other obj
-				Explosion(otherObj.x, otherObj.y);
+				Explosion(otherObj);
 				otherObj.alive = false;
 			}
 		}
@@ -1466,7 +1596,7 @@ let CheckCollision = function(o1, o2)
 		{
 			o1.alive = false;
 			o2.alive = false;
-			Explosion(o1.x, o1.y);
+			Explosion(o1);
 		}
 	}
 
@@ -1474,22 +1604,9 @@ let CheckCollision = function(o1, o2)
 }
 
 /*---------------------------------------------------------------------------*/
-let shuffleArray = function(a) 
-{
-	// wow - this is very expensive - calls rnd a lot, every frame
-    for (let i = (a.length - 1); i > 0; i--) 
-    {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tmp = a[i];
-    	a[i] = a[j];
-    	a[j] = tmp;
-    }
-    return a;
-}
-
-/*---------------------------------------------------------------------------*/
 let DoObjectPairInteraction = function(o1, o2)
 {
+	ASSERT(o1 !== o2);
 	CheckCollision(o1, o2);
 	ApplyGravity(o1, o2);
 }
@@ -1498,31 +1615,20 @@ let DoObjectPairInteraction = function(o1, o2)
 // act on each pair of objects exactly once 
 let DoObjectPairInteractions = function()
 {
-	const len = gObjects.length;
+	const num = gObjects.length;
 
-	if (len <= kMaxNumObjects)
-		for (var i = 0; i < len; ++i) 
-			gRandomIntsArray[i] = i;
+	for (let i1 = 0; i1 < (num - 1); i1++)
+	{
+		const o1 = gObjects[i1];
+		if (!o1.isActive()) 
+			continue;
 
-	// actually i dont think this matters since the mass & position
-	// dont change during this loop
-	gRandomIntsArray = shuffleArray(gRandomIntsArray);
-
-	for (let k1 = 0; k1 < (len - 1); k1++)
-	{	
-		for (let k2 = (k1 + 1); k2 < len; k2++)
+		for (let i2 = (i1 + 1); i2 < num; i2++)
 		{
-			ASSERT(k1 !== k2);
-
-			const i1 = gRandomIntsArray[k1];
-			const i2 = gRandomIntsArray[k2];
 			ASSERT(i1 !== i2);
 
-			let o1 = gObjects[i1];
-			let o2 = gObjects[i2];
-			ASSERT(o1 !== o2);
-
-			if (!o1.isActive() || !o2.isActive()) 
+			const o2 = gObjects[i2];
+			if (!o2.isActive()) 
 				continue;
 			
 			DoObjectPairInteraction(o1, o2);
@@ -1544,15 +1650,15 @@ let DrawText = function ()
 
 	const d = (gShipDistanceFromGround === INT_MAX ? 0 : gShipDistanceFromGround);
 	ctx.fillText("# objects: " + gNumActiveObjects + 
-							", " + gObjects.length + 
-							", " + d.toFixed(0) +
-							//", (" + gShipObject.velX.toFixed(0) + "," + 
-							//		gShipObject.velY.toFixed(0) + ")", 
-							(gTotalRotateTimeMS > 0 ?
-								(", rotate: " + gTotalRotateTimeMS.toFixed(0) +
-								", diff: " + diffMS.toFixed() +
-								", percentageRotate: " + percentageRotate.toFixed(0)) : ""),
-							24, canvas.height - 24);
+				", " + gObjects.length + 
+				", " + d.toFixed(0) +
+				//", (" + gShipObject.velX.toFixed(0) + "," + 
+				//		gShipObject.velY.toFixed(0) + ")", 
+				(gTotalRotateTimeMS > 0 ?
+					(", rotate: " + gTotalRotateTimeMS.toFixed(0) +
+					", diff: " + diffMS.toFixed() +
+					", percentageRotate: " + percentageRotate.toFixed(0)) : ""),
+				24, canvas.height - 24);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1564,19 +1670,23 @@ let AnimateAndDrawObjects = function (deltaMS)
 	// animate & draw all the active objects in the gObjects array
   	for (let i = 0; i < gObjects.length; i++) 
   	{
-  		let obj = gObjects[i];
+  		const obj = gObjects[i];
     	if (!obj.isActive()) 
     		continue;
 
-    	// do the per-frame work
+    	// do the per-frame work on this object
   		obj.applyPhysics(deltaS);
   		obj.adjustBounds();
   		obj.updateAliveState();
   		obj.draw();
   		gNumActiveObjects++;
   	}
+}
 
-  	if (gResetGravityObjects)
+/*---------------------------------------------------------------------------*/
+let CheckResetGravity = function () 
+{
+	if (gResetGravityObjects)
   	{
   		gResetGravityObjects = false;
   		CreateGravityObjects();
@@ -1618,10 +1728,13 @@ let Exit = function () {};
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
+	initElements();
+
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
 	gShipObject.setKilledBy(types.CIRCLE);
 	gShipObject.addMinimap(kShipColor);
+	gShipObject.hasTrail = true;
 	ResetShip();
 
 	// logo pic
@@ -1662,6 +1775,7 @@ let DoOneFrame = function ()
 	DoObjectPairInteractions();
 	CheckShipWithinLines();
 	AnimateAndDrawObjects(deltaMS);
+	CheckResetGravity();
 	DoGame();
 	DrawText();
 	ShowScoreStats();
@@ -1693,7 +1807,9 @@ let main = function ()
 
 /*---------------------------------------------------------------------------*/
 // Cross-browser support for requestAnimationFrame
-let w = window;
-requestAnimationFrame = w.requestAnimationFrame || w.webkitRequestAnimationFrame || w.msRequestAnimationFrame || w.mozRequestAnimationFrame;
+requestAnimationFrame = window.requestAnimationFrame || 
+						window.webkitRequestAnimationFrame || 
+						window.msRequestAnimationFrame || 
+						window.mozRequestAnimationFrame;
 
 
