@@ -44,7 +44,7 @@ const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
 const kShipGravityV = 140; // 100
 
 /*---------------------------------------------------------------------------*/
-let setPosition = function(el, right, vert)
+let SetPosition = function(el, right, vert)
 {
 	el.style.position = "absolute";
 	el.style.right = right + 'px';
@@ -53,16 +53,16 @@ let setPosition = function(el, right, vert)
 
 /*---------------------------------------------------------------------------*/
 // util function for adding a slider element
-let addSlider = function(id, name, setValFunc, bottomMargin)
+let AddSlider = function(id, name, setValFunc, bottomMargin)
 {
 	// slider element
 	let s = document.getElementById(id);
-	setPosition(s, kRightPos, gVertPos);
+	SetPosition(s, kRightPos, gVertPos);
 
 	// label element for the slider
 	const labelElementName = (id + "_value"); // convention in HTML
 	let s_val = document.getElementById(labelElementName);
-	setPosition(s_val, kRightPosValue, (gVertPos - kValueVertOffset));
+	SetPosition(s_val, kRightPosValue, (gVertPos - kValueVertOffset));
 
 	// fixme - make the defaults set in JS instead of from the HTML
 	s_val.innerHTML = name + ": " + s.value;
@@ -78,109 +78,32 @@ let addSlider = function(id, name, setValFunc, bottomMargin)
 }
 
 /*---------------------------------------------------------------------------*/
-function initElements() 
+function InitElements() 
 {
 	// add the sliders
-	addSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	20);
-	addSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	20);
-	addSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	20);
-	addSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	20);
-	addSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	30);
+	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	20);
+	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	20);
+	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	20);
+	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	20);
+	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	30);
 
 	// add the Reset button
 	var button = document.getElementById("button");
-	setPosition(button, kRightPosValue, gVertPos);
+	SetPosition(button, kRightPosValue, gVertPos);
 	button.onclick = function() {
 		gResetGravityObjects = true;
 	}
 }
 
 /*---------------------------------------------------------------------------*/
-function getCurvePoints(pts) 
-{  
-    const tension = 0.5;
-    const isClosed = false; 
-    const numSegments = 16;
-
-    var _pts = [],    			// cloned array
-    	res = [], 				// modified array
-        x, y,           		// our x,y coords
-        t1x, t2x, t1y, t2y, 	// tension vectors
-        c1, c2, c3, c4,     	// cardinal points
-        st, t, i;       		// steps based on numSegments
-
-    // clone array so we don't change the original
-    _pts = pts.slice(0);
-
-    // The algorithm require a previous and next point to the actual point array.
-    // Check if we will draw closed or open curve.
-    // If closed, copy end points to beginning and first points to end
-    // If open, duplicate first points to beginning, end points to end
-    if (isClosed) {
-        _pts.unshift(pts[pts.length - 1]);
-        _pts.unshift(pts[pts.length - 2]);
-        _pts.unshift(pts[pts.length - 1]);
-        _pts.unshift(pts[pts.length - 2]);
-        _pts.push(pts[0]);
-        _pts.push(pts[1]);
-    }
-    else {
-        _pts.unshift(pts[1]);   //copy 1. point and insert at beginning
-        _pts.unshift(pts[0]);
-        _pts.push(pts[pts.length - 2]); //copy last point and append
-        _pts.push(pts[pts.length - 1]);
-    }
-
-    // ok, lets start..
-
-    // 1. loop goes through point array
-    // 2. loop goes through each segment between the 2 pts + 1e point before and after
-    for (i = 2; i < (_pts.length - 4); i += 2) 
-    {
-        for (t = 0; t <= numSegments; t++) 
-        {
-            // calc tension vectors
-            t1x = (_pts[i+2] - _pts[i-2]) * tension;
-            t2x = (_pts[i+4] - _pts[i  ]) * tension;
-
-            t1y = (_pts[i+3] - _pts[i-1]) * tension;
-            t2y = (_pts[i+5] - _pts[i+1]) * tension;
-
-            // calc step
-            st = t / numSegments;
-
-            // calc cardinals
-            c1 =   2 * Math.pow(st, 3)  - 3 * Math.pow(st, 2) + 1; 
-            c2 = -(2 * Math.pow(st, 3)) + 3 * Math.pow(st, 2); 
-            c3 =       Math.pow(st, 3)  - 2 * Math.pow(st, 2) + st; 
-            c4 =       Math.pow(st, 3)  -     Math.pow(st, 2);
-
-            // calc x and y cords with common control vectors
-            x = c1 * _pts[i]    + c2 * _pts[i+2] + c3 * t1x + c4 * t2x;
-            y = c1 * _pts[i+1]  + c2 * _pts[i+3] + c3 * t1y + c4 * t2y;
-
-            //store points in array
-            res.push(x);
-            res.push(y);
-        }
-    }
-
-    return res;
-}
-
-/*---------------------------------------------------------------------------*/
-function drawLines(ctx, pts) 
+function DrawCurve(pts) 
 {
+    ctx.beginPath();
+
     ctx.moveTo(pts[0], pts[1]);
     for (let i = 2; i < pts.length - 1; i += 2) 
     	ctx.lineTo(pts[i], pts[i+1]);
-}
 
-/*---------------------------------------------------------------------------*/
-function drawCurve(ctx, ptsa) 
-{
-    ctx.beginPath();
-    drawLines(ctx, getCurvePoints(ptsa));
     ctx.stroke();
 }
 
@@ -411,38 +334,48 @@ class Object
 	}
 
 	/*---------------------------------------------------------------------------*/
-	applyPhysics(delta) 
+	resetAcceleration() 
 	{
-		if (!this.isFixed)
-		{	
-			// apply acceleration to velocity
-			this.velX += (this.accX * delta);
-			this.velY += (this.accY * delta);
-
-			let maxV = sGravitySettings.maxV;
-			if (maxV > 0)
-			{
-				if (maxV < 400)
-					maxV = 400;
-
-				this.velX = Bound(this.velX, maxV);
-				this.velY = Bound(this.velY, maxV);
-			}
-
-			// apply velocity to position
-			this.x += (this.velX * delta);
-			this.y += (this.velY * delta);
-
-			if (this.hasTrail)
-				this.drawTrail();
-		}
-
 		// if this object has gravity, reset its acceleration -
-		// it will get accumulated in ApplyGravity by the other objects
-		// acceleration is the ONLY changebale force
-		// 
+		// the acceleration will get accumulated in ApplyGravity by 
+		// the other objects
+		// acceleration is the ONLY changeable force
+		
 		if (this.hasGravity())
 			this.accX = this.accY = 0;
+	}
+	
+
+	/*---------------------------------------------------------------------------*/
+	boundVelocity(delta) 
+	{
+		// bound velocity if maxV is set
+		let maxV = sGravitySettings.maxV;
+		if (maxV > 0)
+		{
+			if (maxV < 400)
+				maxV = 400;
+
+			this.velX = Bound(this.velX, maxV);
+			this.velY = Bound(this.velY, maxV);
+		}
+	}
+
+	/*---------------------------------------------------------------------------*/
+	applyPhysics(delta) 
+	{
+		if (this.isFixed)
+			return;
+
+		// apply acceleration to velocity
+		this.velX += (this.accX * delta);
+		this.velY += (this.accY * delta);
+
+		this.boundVelocity();
+
+		// apply velocity to position
+		this.x += (this.velX * delta);
+		this.y += (this.velY * delta);
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -469,19 +402,34 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	drawTrail()
 	{
+		if (!this.hasTrail)
+			return;
+
+		const dontShowTrails = (sGravitySettings.minG > 10);
+		if (dontShowTrails)
+		{
+			this.trail = [];
+			return;
+		}
+
 		// add the current position, and draw the trail
+
+		// NOTE: we use a special array layout where each 
+		// (x,y) point is 2 entries:
+		//   { x1,y1, x2,y2, x3,y3, x4,y4, ... }
 
 		// remove the front 2 entries and shift all 
 		// entries down 2 (each point is 2 entries)
 		this.trail.shift();
 		this.trail.shift();
 
-		// add the center point to the end of the trail array
+		// add the current position to the end of the trail array
 		this.trail[(kTrailSize * 2)] 	 = this.x;
 		this.trail[(kTrailSize * 2) + 1] = this.y;
 
 		// draw the trail
-		drawCurve(ctx, this.trail);
+		ctx.strokeStyle = this.trailColor || "green";
+		DrawCurve(this.trail);
 	}
 }
 
@@ -714,7 +662,7 @@ let NewTextBubble = function(text, pos, color, first)
 	const y = pos.y - 150;
 	const p = {x: pos.x + (gSwitch ? 80 : -80), y: pos.y - 80};
 	const v = {x: rnd(-30,30), y: rnd(-50,-20)};
-	const a = {x:0, y:0}; //{x: rnd(-30,30), y: rnd(-30,-10)};
+	const a = {x:0, y:0}; 
 	let obj = new Object(types.TEXT_BUBBLE, p.x, p.y, v.x, v.y, a.x, a.y, color, 0);
 	obj.text = text;
 	obj.setLifetime(first ? 3000 : 1000);
@@ -922,7 +870,8 @@ let ShootBullet = function(p, a)
 /*---------------------------------------------------------------------------*/
 let ShootBullets = function(p)
 {
-	const kOffset = (M_PI_4 * 0.27);
+	const kOffsetMult = 0.27;
+	const kOffset = (M_PI_4 * kOffsetMult);
 
 	ShootBullet(p, gShipAngle - kOffset);
 	ShootBullet(p, gShipAngle);
@@ -1013,6 +962,7 @@ let NewGravityObject = function(x, y, mass)
 	obj.mass = mass;
 	obj.isGravityObject = true;
 	obj.hasTrail = true;
+	obj.trailColor = RandomColor();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1040,29 +990,15 @@ let Bound = function(val, min, max)
 }
 
 // gravity settings:
-const s2 =  {min: 0,  max: 160,  g: 1000, shipG: 0};
-const s3 =  {min: 0,  max: 100,  g: 400,  shipG: 300};
-const s5 =  {min: 20, max: 60, 	 g: 600,  shipG: 300};
-const s8 =  {min: 20, max: 20, 	 g: 70,   shipG: 300};
-const s9 =  {min: 0,  max: 70, 	 g: 200,  shipG: 100};
-const s10 = {min: 0,  max: 40, 	 g: 600,  shipG: 1000};
-const s11 = {min: 0,  max: 40,	 g: 600,  shipG: 60};
-const s12 = {min: 0,  max: 100,	 g: 600,  shipG: 60};
-const s13 = {min: 0,  max: 100,	 g: 1000, shipG: 30};
-const s14 = {min: 0,  max: 1500, g: 200,  shipG: 100, rnd: 1};
-const s15 = {min: 20, max: 1000, g: 500,  shipG: 100};
-const s16 = {min: 20,  max: 1500, g: 200,  shipG: 100};
-const s17 = {min: 20,  max: 1500, g: 100,  shipG: 100};
-const s18 = {min: 20, max: 1000, g: 500,  shipG: 0};
-const s19 = {min: 20, max: 1000, g: 500,  shipG: 60, maxV: 500}; // good one with 11 objects 
-const s191 = {min: 20, max: 1000, g: 500,  shipG: 30, maxV: 450}; 
-const s20 = {min: 20, max: 1000, g: 100,  shipG: 60, rnd: 1};
-const s21 = {min: 4, max: 200, g: 80,  shipG: 60};
-const s141 = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
-const s141_copy_its_a_good_one_w_17_objects = {min: 20,  max: 1500, g: 200,  shipG: 300, rnd: 1};
-const s22 = {min: 20, max: 1000, g: 500,  shipG: 0, maxV: 450}; 
+const s19 = {minG: 20, maxG: 1000, g: 500,  shipG: 60, maxV: 500}; // good one with 11 objects 
+const s191 = {minG: 20, maxG: 1000, g: 500,  shipG: 30, maxV: 450}; 
+const s141_copy_its_a_good_one_w_17_objects = {minG: 20,  maxG: 1500, g: 200,  shipG: 300, rnd: 1};
+const s22 = {minG: 20, maxG: 1000, g: 500,  shipG: 0, maxV: 450}; 
 
-sGravitySettings = s19; 
+const s19_lowShipG = {minG: 20, maxG: 1000, g: 500,  shipG: 20, maxV: 500}; // good one with 11 objects 
+
+// this is the best ever don't change it
+sGravitySettings = s19_lowShipG; 
 
 /*---------------------------------------------------------------------------*/
 // ApplyGravity
@@ -1073,8 +1009,8 @@ let ApplyGravity = function(o1, o2)
 	if (!(sGravitySettings && o1.hasGravity() && o2.hasGravity()))
 		return;
 
-	const kMinG = 	sGravitySettings.min;
-	const kMaxG = 	sGravitySettings.max;
+	const kMinG = 	sGravitySettings.minG;
+	const kMaxG = 	sGravitySettings.maxG;
 	const kG = 		sGravitySettings.g;
 	
 	// distance between the 2 objects
@@ -1438,6 +1374,14 @@ let RotationScore = function (numRotations)
 }
 
 /*---------------------------------------------------------------------------*/
+let ShipRotated = function ()
+{
+	gNumRotations++;
+	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+	RotationScore(gNumRotations);
+}
+
+/*---------------------------------------------------------------------------*/
 let CheckRotation = function (isRotating)
 {
 	if (isRotating)
@@ -1458,11 +1402,7 @@ let CheckRotation = function (isRotating)
 			
 			// see if we have crossed the threshold
 			if (angularChange > nextRotationThreshold)
-			{
-				gNumRotations++;
-				gShipBlinkEndMS_RotateMS = (gNowMS + 800);
-				RotationScore(gNumRotations);
-			}
+				ShipRotated();
 		}
 	}
 	else
@@ -1639,6 +1579,8 @@ let DoObjectPairInteractions = function()
 /*---------------------------------------------------------------------------*/
 let DrawText = function () 
 {
+	return;
+
 	// text in lower left
   	ctx.fillStyle = kTextColor;
 	ctx.font = "16px Helvetica";
@@ -1676,9 +1618,11 @@ let AnimateAndDrawObjects = function (deltaMS)
 
     	// do the per-frame work on this object
   		obj.applyPhysics(deltaS);
+  		obj.resetAcceleration();
   		obj.adjustBounds();
   		obj.updateAliveState();
   		obj.draw();
+  		obj.drawTrail();
   		gNumActiveObjects++;
   	}
 }
@@ -1728,7 +1672,7 @@ let Exit = function () {};
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
-	initElements();
+	InitElements();
 
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
@@ -1740,7 +1684,7 @@ let Init = function ()
 	// logo pic
 	let logoPos = {x: 80, y: 10};
 	if (GravityEnabled())
-		logoPos = {x: canvas.width - 280, y: canvas.height - 300};
+		logoPos = {x: canvas.width - 150, y: canvas.height - 160};
 
 	NewImageObject(logoPos.x,logoPos.y,0,0,0,0,'images/GP.png');			
 
