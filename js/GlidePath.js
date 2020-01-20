@@ -47,7 +47,7 @@ let sGravitySettingsBest = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 7; //urlParams.get('num');
+let gNumGravityObjects = 5; //urlParams.get('num');
 const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
 const kShipGravityV = 140; // 100
 
@@ -61,7 +61,7 @@ let SetPosition = function(el, right, vert)
 
 /*---------------------------------------------------------------------------*/
 // util function for adding a slider element
-let AddSlider = function(id, name, setValFunc, bottomMargin)
+let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 {
 	// slider element
 	let s = document.getElementById(id);
@@ -72,15 +72,18 @@ let AddSlider = function(id, name, setValFunc, bottomMargin)
 	let s_val = document.getElementById(labelElementName);
 	SetPosition(s_val, kRightPosValue, (gVertPos - kValueVertOffset));
 
-	// fixme - make the defaults set in JS instead of from the HTML
-	s_val.innerHTML = name + ": " + s.value;
-
-	// install the setValFunc callback as the action when slider moves
-	s.oninput = function() 
+	let update = function(val)
 	{
-	  	setValFunc(this.value); 					// update data model
-	  	s_val.innerHTML = name + ": " + this.value; // update UI
+		setValFunc(val); 						// update data model
+	  	s_val.innerHTML = name + ": " + val; 	// update UI
 	}
+
+	// install the update callback as the action when slider moves
+	s.oninput = function() { update(this.value); }
+
+	// set initial val
+	update(initialVal);
+	s.value = initialVal;
 
 	gVertPos += bottomMargin;
 }
@@ -89,11 +92,11 @@ let AddSlider = function(id, name, setValFunc, bottomMargin)
 function InitElements() 
 {
 	// add the sliders
-	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	20);
-	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	20);
-	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	20);
-	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	20);
-	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	30);
+	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	sGravitySettings.g, 20);
+	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	sGravitySettings.maxG, 20);
+	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	sGravitySettings.minG, 20);
+	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	sGravitySettings.maxV, 20);
+	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
 
 	// add the Reset button
 	var resetBtn = document.getElementById("resetBtn");
@@ -215,7 +218,7 @@ let gPointsByKeepingLowIndex = 1;
 let gPointsByKeepingLow = 0;
 let gSwitch = false;
 let gResetGravityObjects = false;
-let gStartGravityObjects = false;
+let gStartGravityObjects = true;
 
 let gScoreBest = localStorage.getItem('highScore') | 0;
 
@@ -398,14 +401,18 @@ class Object
 	}
 
 	/*---------------------------------------------------------------------------*/
-	applyPhysics(delta) 
+	updateStartGravity()
 	{
 		if (gStartGravityObjects)
 		{
 			if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
 				this.isFixed = false;
 		}
+	}
 
+	/*---------------------------------------------------------------------------*/
+	applyPhysics(delta) 
+	{
 		if (this.isFixed)
 			return;
 
@@ -604,6 +611,7 @@ let ColorForShip = function ()
 let ResetShip = function () 
 {
 	gShipObject.isFixed = true;
+	gShipObject.trail = []; // clear trail
 
 	gShipAngle = 0;
 	CalcSinCosForShip();
@@ -1004,7 +1012,7 @@ let NewGravityObject = function(x, y, mass)
 	obj.isGravityObject = true;
 	obj.hasTrail = true;
 	obj.trailColor = RandomColor();; //RandomPastelColor(); //RandomBrightColor();
-	obj.isFixed = true;
+	obj.isFixed = !gStartGravityObjects;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1035,7 +1043,7 @@ let Bound = function(val, min, max)
 const s19 = {minG: 20, maxG: 1000, g: 500,  shipG: 60, maxV: 500}; // good one with 11 objects 
 const s191 = {minG: 20, maxG: 1000, g: 500,  shipG: 30, maxV: 450}; 
 const s141_copy_its_a_good_one_w_17_objects = {minG: 20,  maxG: 1500, g: 200,  shipG: 300, rnd: 1};
-const s22 = {minG: 20, maxG: 1000, g: 500,  shipG: 0, maxV: 450}; 
+const s22 = {minG: 17, maxG: 1500, g: 470, shipG: 0, maxV: 450}; 
 
 const s19_lowShipG = {minG: 20, maxG: 1000, g: 500,  shipG: 20, maxV: 500}; 
 
@@ -1660,6 +1668,7 @@ let AnimateAndDrawObjects = function (deltaMS)
     		continue;
 
     	// do the per-frame work on this object
+    	obj.updateStartGravity();
   		obj.applyPhysics(deltaS);
   		obj.resetAcceleration();
   		obj.adjustBounds();
@@ -1736,6 +1745,7 @@ let Init = function ()
 		if (sGravitySettings.shipG)
 			gShipObject.mass = sGravitySettings.shipG;
 
+		gStartGravityObjects = true; // start out moving
 		CreateGravityObjects();
 	}
 	else
