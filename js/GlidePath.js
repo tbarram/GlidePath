@@ -25,6 +25,13 @@ function ASSERT(cond, str)
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
+/*function mouseClick(e){
+    alert("e");
+    console.log("yo");
+    console.log(e);
+}
+canvas.addEventListener('mousedown', mouseClick);*/
+
 // using the window values causes glitches, so hardcode
 canvas.width = 1200; //window.innerWidth;
 canvas.height = 680; //window.innerHeight;
@@ -36,6 +43,7 @@ const kRightPos = 160;
 const kRightPosValue = 50;
 const kValueVertOffset = 14;
 let sGravitySettings = {};
+let sGravitySettingsBest = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
@@ -88,11 +96,31 @@ function InitElements()
 	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	30);
 
 	// add the Reset button
-	var button = document.getElementById("button");
-	SetPosition(button, kRightPosValue, gVertPos);
-	button.onclick = function() {
+	var resetBtn = document.getElementById("resetBtn");
+	SetPosition(resetBtn, kRightPosValue, gVertPos);
+	resetBtn.onclick = function() {
 		gResetGravityObjects = true;
 	}
+
+	// add the Start button
+	var startBtn = document.getElementById("startBtn");
+	SetPosition(startBtn, kRightPosValue + 60, gVertPos);
+	startBtn.onclick = function() {
+		gStartGravityObjects = true;
+	}
+
+	// add the Trail checkbox
+	var trailCheckbox = document.getElementById("trail");
+	SetPosition(trailCheckbox, kRightPosValue + 226, gVertPos);
+	sGravitySettings.showTrails = false; // default to off
+	trailCheckbox.onclick = function() {
+		sGravitySettings.showTrails = trailCheckbox.checked;
+	}
+
+	// label element for the trail checkbox
+	let label = document.getElementById("trail_value");
+	SetPosition(label, kRightPosValue + 130, gVertPos - 14);
+	label.innerHTML = "Show trails";
 }
 
 /*---------------------------------------------------------------------------*/
@@ -114,6 +142,13 @@ let RandomWidth = function (padL,padR) { return rnd(padL, canvas.width - (padR |
 let RandomHeight = function (padT,padB) { return rnd(padT, canvas.height - (padB || padT)); }
 let RGB = function(r,g,b) { return 'rgb(' + r + ',' + g + ',' + b +')'; }
 let RandomColor = function() { return RGB(rnd(0,255), rnd(0,255), rnd(0,255)); }
+let RandomBrightColor = function() { return RGB(rnd(128,255), rnd(128,255), rnd(128,255)); }
+function RandomPastelColor() { 
+  return "hsl(" + 360 * Math.random() + ',' +
+             (25 + 70 * Math.random()) + '%,' + 
+             (85 + 10 * Math.random()) + '%)'
+}
+
 
 /*---------------------------------------------------------------------------*/
 const kMaxNumObjects = 512;
@@ -180,6 +215,7 @@ let gPointsByKeepingLowIndex = 1;
 let gPointsByKeepingLow = 0;
 let gSwitch = false;
 let gResetGravityObjects = false;
+let gStartGravityObjects = false;
 
 let gScoreBest = localStorage.getItem('highScore') | 0;
 
@@ -364,6 +400,12 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	applyPhysics(delta) 
 	{
+		if (gStartGravityObjects)
+		{
+			if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
+				this.isFixed = false;
+		}
+
 		if (this.isFixed)
 			return;
 
@@ -405,8 +447,7 @@ class Object
 		if (!this.hasTrail)
 			return;
 
-		const dontShowTrails = (sGravitySettings.minG > 10);
-		if (dontShowTrails)
+		if (!sGravitySettings.showTrails)
 		{
 			this.trail = [];
 			return;
@@ -962,7 +1003,8 @@ let NewGravityObject = function(x, y, mass)
 	obj.mass = mass;
 	obj.isGravityObject = true;
 	obj.hasTrail = true;
-	obj.trailColor = RandomColor();
+	obj.trailColor = RandomColor();; //RandomPastelColor(); //RandomBrightColor();
+	obj.isFixed = true;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -995,10 +1037,11 @@ const s191 = {minG: 20, maxG: 1000, g: 500,  shipG: 30, maxV: 450};
 const s141_copy_its_a_good_one_w_17_objects = {minG: 20,  maxG: 1500, g: 200,  shipG: 300, rnd: 1};
 const s22 = {minG: 20, maxG: 1000, g: 500,  shipG: 0, maxV: 450}; 
 
-const s19_lowShipG = {minG: 20, maxG: 1000, g: 500,  shipG: 20, maxV: 500}; // good one with 11 objects 
+const s19_lowShipG = {minG: 20, maxG: 1000, g: 500,  shipG: 20, maxV: 500}; 
 
 // this is the best ever don't change it
 sGravitySettings = s19_lowShipG; 
+sGravitySettingsBest = s19_lowShipG;
 
 /*---------------------------------------------------------------------------*/
 // ApplyGravity
@@ -1663,7 +1706,7 @@ let GravityEnabled = function()
 let CreateGravityObjects = function()
 {
 	for (let i = 0; i < gNumGravityObjects; i++)
-		NewGravityObject(RandomWidth(100), RandomHeight(50), sGravitySettings.rnd ? rnd(20,60) : 30);
+		NewGravityObject(RandomWidth(200), RandomHeight(200), sGravitySettings.rnd ? rnd(20,60) : 30);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1725,6 +1768,7 @@ let DoOneFrame = function ()
 	ShowScoreStats();
 
 	gSwitch = !gSwitch;
+	gStartGravityObjects = false;
 };
 
 /*---------------------------------------------------------------------------*/
