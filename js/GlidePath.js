@@ -25,12 +25,68 @@ function ASSERT(cond, str)
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
-/*function mouseClick(e){
-    alert("e");
-    console.log("yo");
-    console.log(e);
+let lastX = 0;
+let lastY = 0;
+let offsetX = canvas.offsetLeft;
+let offsetY = canvas.offsetTop;
+let mouseIsDown = false;
+let draggedObject = 0;
+
+/*---------------------------------------------------------------------------*/
+function handleMouseDown(e)
+{
+  lastX = parseInt(e.clientX - offsetX);
+  lastY = parseInt(e.clientY - offsetY);
+  mouseIsDown = true;
 }
-canvas.addEventListener('mousedown', mouseClick);*/
+
+/*---------------------------------------------------------------------------*/
+function handleMouseUp(e)
+{
+  mouseIsDown = false;
+  draggedObject.isBeingDragged = false;
+  draggedObject = 0;
+}
+
+/*---------------------------------------------------------------------------*/
+function handleMouseMove(e)
+{
+  	if (!mouseIsDown)
+    	return; 
+
+  	const mouseX = parseInt(e.clientX - offsetX);
+  	const mouseY = parseInt(e.clientY - offsetY);
+
+	for (let i = 0; i < gObjects.length; i++)
+	{
+		let obj = gObjects[i];
+		if (!obj.isActive())
+			continue;
+
+		// see if the mouse is inside this object
+		if (obj.isPointInside(mouseX, mouseY, 4))
+		{
+			// only allow one object to be dragged at a time
+			if (!draggedObject || (draggedObject === obj))
+			{
+				draggedObject = obj;
+
+				obj.isBeingDragged = true;
+				obj.x += (mouseX - lastX);
+				obj.y += (mouseY - lastY);
+				obj.draw();
+				break;
+			}
+		}
+	}
+
+	lastX = mouseX;
+  	lastY = mouseY;
+}
+
+canvas.addEventListener('mousedown', handleMouseDown);
+canvas.addEventListener('mousemove', handleMouseMove);
+canvas.addEventListener('mouseup', handleMouseUp);
 
 // using the window values causes glitches, so hardcode
 canvas.width = 1200; //window.innerWidth;
@@ -127,15 +183,25 @@ function InitElements()
 }
 
 /*---------------------------------------------------------------------------*/
-function DrawCurve(pts) 
+function CreateCurvePath(pts) 
 {
     ctx.beginPath();
 
-    ctx.moveTo(pts[0], pts[1]);
-    for (let i = 2; i < pts.length - 1; i += 2) 
-    	ctx.lineTo(pts[i], pts[i+1]);
+    let firstValid = 0;
+    for (let i = 0; i < pts.length; i++) 
+    {
+    	if (pts[i])
+    	{
+    		firstValid = i;
+    		break;
+    	}
+    }
 
-    ctx.stroke();
+    ctx.moveTo(pts[firstValid].x, pts[firstValid].y);
+    for (let i = firstValid + 1; i < pts.length; i++) 
+    	ctx.lineTo(pts[i].x, pts[i].y);
+
+    //ctx.stroke();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -276,6 +342,7 @@ class Object
 		this.ready = true;
 		this.alive = true;
 		this.isFixed = false;
+		this.isBeingDragged = false;
 		this.killedByBitmask = 0;
 		this.isGravityObject = false;
 
@@ -413,7 +480,7 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	applyPhysics(delta) 
 	{
-		if (this.isFixed)
+		if (this.isFixed || this.isBeingDragged)
 			return;
 
 		// apply acceleration to velocity
@@ -425,6 +492,15 @@ class Object
 		// apply velocity to position
 		this.x += (this.velX * delta);
 		this.y += (this.velY * delta);
+	}
+
+	/*---------------------------------------------------------------------------*/
+	isPointInside(x, y, margin) 
+	{
+		return (x >= (this.x - margin) && 
+    			x <= (this.x + (this.width + margin)) &&
+    			y >= (this.y - margin) &&
+    			y <= (this.y + (this.height + margin)));
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -451,10 +527,7 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	drawTrail()
 	{
-		if (!this.hasTrail)
-			return;
-
-		if (!sGravitySettings.showTrails)
+		if (!this.hasTrail || this.isFixed || !sGravitySettings.showTrails)
 		{
 			this.trail = [];
 			return;
@@ -462,22 +535,20 @@ class Object
 
 		// add the current position, and draw the trail
 
-		// NOTE: we use a special array layout where each 
-		// (x,y) point is 2 entries:
-		//   { x1,y1, x2,y2, x3,y3, x4,y4, ... }
-
-		// remove the front 2 entries and shift all 
-		// entries down 2 (each point is 2 entries)
-		this.trail.shift();
-		this.trail.shift();
-
 		// add the current position to the end of the trail array
-		this.trail[(kTrailSize * 2)] 	 = this.x;
-		this.trail[(kTrailSize * 2) + 1] = this.y;
+		this.trail.shift();
+		this.trail[kTrailSize - 1] = {x: this.x, y: this.y};
 
-		// draw the trail
+		// create the trail path
 		ctx.strokeStyle = this.trailColor || "green";
-		DrawCurve(this.trail);
+		CreateCurvePath(this.trail);
+
+		// draw it
+		// we the ship trail separately so that we can check for closed loops
+		if (this.isShip)
+			HandleShipTrail();
+		else
+			ctx.stroke();
 	}
 }
 
@@ -510,6 +581,63 @@ function AddObject(obj)
 		// if we hit this assert it means we've exceeded kMaxNumObjects
 		// (it's OK to increase kMaxNumObjects but it will impact performance)
 		ASSERT(foundOpenSlot, "Exceeded kMaxNumObjects");
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+function HandleShipTrail()
+{
+	// see if ship trail is closed path
+
+	let closedPath = false;
+
+	// dont check points too near each other
+	const dist = 128;
+
+	// check all pairs of points in the trail array 
+	// (that are 'dist' apart)
+	for (let i1 = 0; i1 < (kTrailSize - dist); i1++)
+	{
+		for (let i2 = (i1 + dist); i2 < kTrailSize; i2++)
+		{
+			let p1 = gShipObject.trail[i1];
+			let p2 = gShipObject.trail[i2];
+
+			function pointsClose(p1, p2)
+			{
+				return	(Math.abs(p1.x - p2.x) < 2) &&
+						(Math.abs(p1.y - p2.y) < 2);
+			}
+
+			if (p1 && p2 && p1 !== p2 && pointsClose(p1, p2))
+			{
+				closedPath = true;
+				break;
+			}
+		}
+	}
+
+	// for now we make the entire trail red - 
+	// better to make just the closed loop
+	if (closedPath)
+		ctx.strokeStyle = "red";
+
+	ctx.stroke();
+
+	if (closedPath)
+	{
+		const num = gObjects.length;
+		for (let i = 0; i < num; i++)
+		{
+			const obj = gObjects[i];
+			if (!obj.isActive() || obj.isShip) 
+				continue;
+
+			if (ctx.isPointInPath(obj.x, obj.y))
+			{
+				NewTextBubble("boom", obj, "red");
+			}
+		}
 	}
 }
 
@@ -1731,6 +1859,7 @@ let Init = function ()
 	gShipObject.setKilledBy(types.CIRCLE);
 	gShipObject.addMinimap(kShipColor);
 	gShipObject.hasTrail = true;
+	gShipObject.isShip = true;
 	ResetShip();
 
 	// logo pic
