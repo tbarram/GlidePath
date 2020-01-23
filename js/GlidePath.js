@@ -25,8 +25,8 @@ function ASSERT(cond, str)
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
-let lastX = 0;
-let lastY = 0;
+let lastMouseX = 0;
+let lastMouseY = 0;
 let offsetX = canvas.offsetLeft;
 let offsetY = canvas.offsetTop;
 let mouseIsDown = false;
@@ -35,58 +35,63 @@ let draggedObject = 0;
 /*---------------------------------------------------------------------------*/
 function handleMouseDown(e)
 {
-  lastX = parseInt(e.clientX - offsetX);
-  lastY = parseInt(e.clientY - offsetY);
-  mouseIsDown = true;
+  	lastMouseX = parseInt(e.clientX - offsetX);
+  	lastMouseY = parseInt(e.clientY - offsetY);
+  	mouseIsDown = true;
 }
 
 /*---------------------------------------------------------------------------*/
 function handleMouseUp(e)
 {
-  mouseIsDown = false;
-  draggedObject.isBeingDragged = false;
-  draggedObject = 0;
+	if (draggedObject)
+	{
+  		draggedObject.isBeingDragged = false;
+  		draggedObject = 0;
+  	}
+  	canvas.style.cursor = 'default';
+  	mouseIsDown = false;
 }
 
 /*---------------------------------------------------------------------------*/
 function handleMouseMove(e)
 {
-  	if (!mouseIsDown)
-    	return; 
-
-  	const mouseX = parseInt(e.clientX - offsetX);
+	const mouseX = parseInt(e.clientX - offsetX);
   	const mouseY = parseInt(e.clientY - offsetY);
 
+  	// see if the mouse is over any of our objects
+  	let targetObject = 0;
 	for (let i = 0; i < gObjects.length; i++)
 	{
 		let obj = gObjects[i];
-		if (!obj.isActive())
-			continue;
-
-		// see if the mouse is inside this object
-		if (obj.isPointInside(mouseX, mouseY, 4))
+		if (obj.isActive() && obj.isPointInside(mouseX, mouseY, 8))
 		{
-			// only allow one object to be dragged at a time
-			if (!draggedObject || (draggedObject === obj))
-			{
-				draggedObject = obj;
-
-				obj.isBeingDragged = true;
-				obj.x += (mouseX - lastX);
-				obj.y += (mouseY - lastY);
-				obj.draw();
-				break;
-			}
+			targetObject = obj;
+			break;
 		}
 	}
 
-	lastX = mouseX;
-  	lastY = mouseY;
-}
+	canvas.style.cursor = targetObject ? 'pointer' : 'default';	
 
-canvas.addEventListener('mousedown', handleMouseDown);
-canvas.addEventListener('mousemove', handleMouseMove);
-canvas.addEventListener('mouseup', handleMouseUp);
+	// if mouse is down, handle dragging
+  	if (mouseIsDown)
+  	{
+	  	if (targetObject && !draggedObject)
+	  	{
+			draggedObject = targetObject;
+			draggedObject.isBeingDragged = true;
+		}
+
+		if (draggedObject)
+		{
+			draggedObject.x += (mouseX - lastMouseX);
+			draggedObject.y += (mouseY - lastMouseY);
+			draggedObject.draw();
+		}
+	}
+
+	lastMouseX = mouseX;
+  	lastMouseY = mouseY;
+}
 
 // using the window values causes glitches, so hardcode
 canvas.width = 1200; //window.innerWidth;
@@ -532,8 +537,6 @@ class Object
 			this.trail = [];
 			return;
 		}
-
-		// add the current position, and draw the trail
 
 		// add the current position to the end of the trail array
 		this.trail.shift();
@@ -1853,6 +1856,11 @@ let Exit = function () {};
 let Init = function () 
 {
 	InitElements();
+
+	// install mouse event handlers
+	canvas.addEventListener('mousedown', handleMouseDown);
+	canvas.addEventListener('mousemove', handleMouseMove);
+	canvas.addEventListener('mouseup', handleMouseUp);
 
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
