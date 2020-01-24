@@ -58,15 +58,19 @@ function handleMouseMove(e)
 	const mouseX = parseInt(e.clientX - offsetX);
   	const mouseY = parseInt(e.clientY - offsetY);
 
-  	// see if the mouse is over any of our objects
-  	let targetObject = 0;
-	for (let i = 0; i < gObjects.length; i++)
-	{
-		let obj = gObjects[i];
-		if (obj.isActive() && obj.isPointInside(mouseX, mouseY, 8))
+  	let targetObject = draggedObject;
+
+  	if (!draggedObject)
+  	{
+  		// see if the mouse is over any of our objects
+		for (let i = 0; i < gObjects.length; i++)
 		{
-			targetObject = obj;
-			break;
+			let obj = gObjects[i];
+			if (obj.isActive() && obj.isPointInside(mouseX, mouseY, 8))
+			{
+				targetObject = obj;
+				break;
+			}
 		}
 	}
 
