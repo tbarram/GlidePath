@@ -31,6 +31,7 @@ let offsetX = canvas.offsetLeft;
 let offsetY = canvas.offsetTop;
 let mouseIsDown = false;
 let draggedObject = 0;
+let draggedObjectSavedMass = 0;
 
 /*---------------------------------------------------------------------------*/
 function handleMouseDown(e)
@@ -45,9 +46,12 @@ function handleMouseUp(e)
 {
 	if (draggedObject)
 	{
+		// reset dragged object
   		draggedObject.isBeingDragged = false;
+  		draggedObject.mass = draggedObjectSavedMass;
   		draggedObject = 0;
   	}
+
   	canvas.style.cursor = 'default';
   	mouseIsDown = false;
 }
@@ -60,7 +64,7 @@ function handleMouseMove(e)
 
   	let targetObject = draggedObject;
 
-  	if (!draggedObject)
+  	if (!targetObject)
   	{
   		// see if the mouse is over any of our objects
 		for (let i = 0; i < gObjects.length; i++)
@@ -83,13 +87,17 @@ function handleMouseMove(e)
 	  	{
 			draggedObject = targetObject;
 			draggedObject.isBeingDragged = true;
+
+			// give more mass to dragged obj (& save current val)
+			draggedObjectSavedMass = draggedObject.mass;
+			draggedObject.mass = 140;
 		}
 
+		// update the dragged object position 
 		if (draggedObject)
 		{
 			draggedObject.x += (mouseX - lastMouseX);
 			draggedObject.y += (mouseY - lastMouseY);
-			draggedObject.draw();
 		}
 	}
 
@@ -536,7 +544,7 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	drawTrail()
 	{
-		if (!this.hasTrail || this.isFixed || !sGravitySettings.showTrails)
+		if (!this.hasTrail || !sGravitySettings.showTrails)
 		{
 			this.trail = [];
 			return;
@@ -546,8 +554,12 @@ class Object
 		this.trail.shift();
 		this.trail[kTrailSize - 1] = {x: this.x, y: this.y};
 
-		// create the trail path
+		// style the trail lines
 		ctx.strokeStyle = this.trailColor || "green";
+		const prevLineWidth = ctx.lineWidth;
+		ctx.lineWidth = 2;
+
+		// create the trail path - doesn't draw it, just creates the path
 		CreateCurvePath(this.trail);
 
 		// draw it
@@ -556,6 +568,9 @@ class Object
 			HandleShipTrail();
 		else
 			ctx.stroke();
+
+		// reset 
+		ctx.lineWidth = prevLineWidth;
 	}
 }
 
@@ -602,7 +617,8 @@ function HandleShipTrail()
 	const dist = 128;
 
 	// check all pairs of points in the trail array 
-	// (that are 'dist' apart)
+	// (that are 'dist' apart) to see if 2 points
+	// are equal - that indicates a loop
 	for (let i1 = 0; i1 < (kTrailSize - dist); i1++)
 	{
 		for (let i2 = (i1 + dist); i2 < kTrailSize; i2++)
