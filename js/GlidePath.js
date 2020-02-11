@@ -85,6 +85,8 @@ function handleMouseMove(e)
   	{
 	  	if (targetObject && !draggedObject)
 	  	{
+	  		// we just started dragging
+
 			draggedObject = targetObject;
 			draggedObject.isBeingDragged = true;
 
@@ -120,7 +122,7 @@ let sGravitySettingsBest = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 5; //urlParams.get('num');
+let gNumGravityObjects = 5; //0; //urlParams.get('num');
 const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
 const kShipGravityV = 140; // 100
 
@@ -156,7 +158,6 @@ let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 
 	// set initial val
 	update(initialVal);
-	s.value = initialVal;
 
 	gVertPos += bottomMargin;
 }
@@ -164,6 +165,9 @@ let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 /*---------------------------------------------------------------------------*/
 function InitElements() 
 {
+	// show the controls
+	document.getElementById("gravityControls").style.display = "block"
+
 	// add the sliders
 	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	sGravitySettings.g, 20);
 	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	sGravitySettings.maxG, 20);
@@ -188,7 +192,8 @@ function InitElements()
 	// add the Trail checkbox
 	var trailCheckbox = document.getElementById("trail");
 	SetPosition(trailCheckbox, kRightPosValue + 226, gVertPos);
-	sGravitySettings.showTrails = false; // default to off
+	sGravitySettings.showTrails = true; // default
+	trailCheckbox.checked = sGravitySettings.showTrails;
 	trailCheckbox.onclick = function() {
 		sGravitySettings.showTrails = trailCheckbox.checked;
 	}
@@ -228,11 +233,63 @@ let RandomWidth = function (padL,padR) { return rnd(padL, canvas.width - (padR |
 let RandomHeight = function (padT,padB) { return rnd(padT, canvas.height - (padB || padT)); }
 let RGB = function(r,g,b) { return 'rgb(' + r + ',' + g + ',' + b +')'; }
 let RandomColor = function() { return RGB(rnd(0,255), rnd(0,255), rnd(0,255)); }
-let RandomBrightColor = function() { return RGB(rnd(128,255), rnd(128,255), rnd(128,255)); }
-function RandomPastelColor() { 
-  return "hsl(" + 360 * Math.random() + ',' +
-             (25 + 70 * Math.random()) + '%,' + 
-             (85 + 10 * Math.random()) + '%)'
+
+let DarkViolet = 		function() { return RGB(77,3,34); }
+let LightPurple = 		function() { return RGB(190,182,229); }
+let BrightYellow = 		function() { return RGB(197,243,15); }
+let MellowOrange = 		function() { return RGB(234,148,34); }
+let DeepRed = 			function() { return RGB(162,5,26); }
+let Pink = 				function() { return RGB(243,108,141); }
+let BrightPurple = 		function() { return RGB(206,114,235); }
+let DarkDarkViolet = 	function() { return RGB(19,12,43); }
+let DarkDarkViolet2 = 	function() { return RGB(19,12,73); }
+let DarkRed = 			function() { return RGB(106,23,3); }
+let BlueGray = 			function() { return RGB(163,178,177); }
+let SmokeWhite = 		function() { return RGB(249,245,241); }
+let Aqua = 				function() { return RGB(97,243,206); }
+let WhiteViolet = 		function() { return RGB(241,211,232); }
+
+let rndColorIntArray = [];
+let rndColorIndex = 0;
+const kNumRndColors = 13;
+
+/*---------------------------------------------------------------------------*/
+let shuffle = function(a) 
+{
+  	let top = a.length;
+  	while(--top) 
+  	{
+    	let cur = Math.floor(Math.random() * (top + 1));
+    	let tmp = a[cur];
+    	a[cur] = a[top];
+    	a[top] = tmp;
+  	}
+  	return a;
+}
+
+/*---------------------------------------------------------------------------*/
+let GoodRandomColor = function()
+{
+	const i = rndColorIntArray[rndColorIndex];
+	rndColorIndex = (rndColorIndex + 1) % kNumRndColors;
+
+	switch (i)
+	{
+		case 0: return DarkDarkViolet();
+		case 1: return DarkViolet();
+		case 2: return LightPurple();
+		case 3: return BrightYellow();
+		case 4: return MellowOrange();
+		case 5: return DeepRed();
+		case 6: return Pink();
+		case 7: return BrightPurple();
+		case 8: return DarkRed();
+		case 9: return BlueGray();
+		case 10: return SmokeWhite();
+		case 11: return Aqua();
+		case 12: return DarkDarkViolet2();
+		default: ASSERT(false);
+	}
 }
 
 
@@ -544,7 +601,7 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	drawTrail()
 	{
-		if (!this.hasTrail || !sGravitySettings.showTrails)
+		if (!this.hasTrail || this.isFixed || !sGravitySettings.showTrails)
 		{
 			this.trail = [];
 			return;
@@ -1162,7 +1219,7 @@ let NewGravityObject = function(x, y, mass)
 	obj.mass = mass;
 	obj.isGravityObject = true;
 	obj.hasTrail = true;
-	obj.trailColor = RandomColor();; //RandomPastelColor(); //RandomBrightColor();
+	obj.trailColor = GoodRandomColor();
 	obj.isFixed = !gStartGravityObjects;
 }
 
@@ -1836,6 +1893,8 @@ let CheckResetGravity = function ()
 	if (gResetGravityObjects)
   	{
   		gResetGravityObjects = false;
+  		rndColorIntArray = shuffle(rndColorIntArray);
+  		rndColorIndex = 0;
   		CreateGravityObjects();
 		ResetShip();
   	}
@@ -1866,7 +1925,14 @@ let GravityEnabled = function()
 let CreateGravityObjects = function()
 {
 	for (let i = 0; i < gNumGravityObjects; i++)
-		NewGravityObject(RandomWidth(200), RandomHeight(200), sGravitySettings.rnd ? rnd(20,60) : 30);
+	{
+		const w = RandomWidth(200);
+		const h = RandomHeight(200);
+
+		const kNumSameLoc = 1;
+		for (var j = 0; j < kNumSameLoc; j++)
+			NewGravityObject(w, h, sGravitySettings.rnd ? rnd(20,60) : 30);
+	}
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1875,12 +1941,19 @@ let Exit = function () {};
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
-	InitElements();
+	if (gGravityGameActive)
+	{
+		InitElements();
 
-	// install mouse event handlers
-	canvas.addEventListener('mousedown', handleMouseDown);
-	canvas.addEventListener('mousemove', handleMouseMove);
-	canvas.addEventListener('mouseup', handleMouseUp);
+		// install mouse event handlers
+		canvas.addEventListener('mousedown', handleMouseDown);
+		canvas.addEventListener('mousemove', handleMouseMove);
+		canvas.addEventListener('mouseup', handleMouseUp);
+
+		// init the a normal integer array
+		for (let i = 0; i < kNumRndColors; ++i) 
+			rndColorIntArray[i] = i;
+		}
 
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
@@ -1891,7 +1964,7 @@ let Init = function ()
 	ResetShip();
 
 	// logo pic
-	let logoPos = {x: 80, y: 10};
+	let logoPos = {x: 120, y: 120};
 	if (GravityEnabled())
 		logoPos = {x: canvas.width - 150, y: canvas.height - 160};
 
