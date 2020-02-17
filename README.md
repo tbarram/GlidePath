@@ -2,6 +2,7 @@
 
 To use:
 
-Clone source
-Launch index.html
+1. Clone source
+2. Launch index.html
+
 
