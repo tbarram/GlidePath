@@ -158,6 +158,7 @@ let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 
 	// set initial val
 	update(initialVal);
+	s.value = initialVal;
 
 	gVertPos += bottomMargin;
 }
