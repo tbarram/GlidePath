@@ -29,6 +29,8 @@ of gravity.
 
 
 Author:
-  Ted Barram
-  tbarram@yahoo.com
+
+     Ted Barram
+  
+     tbarram@yahoo.com
 
