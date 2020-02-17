@@ -619,12 +619,12 @@ class Object
 		// create the trail path - doesn't draw it, just creates the path
 		CreateCurvePath(this.trail);
 
-		// draw it
-		// we the ship trail separately so that we can check for closed loops
+		// check for closed loops
 		if (this.isShip)
 			HandleShipTrail();
-		else
-			ctx.stroke();
+		
+		// draw it
+		ctx.stroke();
 
 		// reset 
 		ctx.lineWidth = prevLineWidth;
@@ -667,7 +667,6 @@ function AddObject(obj)
 function HandleShipTrail()
 {
 	// see if ship trail is closed path
-
 	let closedPath = false;
 
 	// dont check points too near each other
@@ -701,8 +700,6 @@ function HandleShipTrail()
 	// better to make just the closed loop
 	if (closedPath)
 		ctx.strokeStyle = "red";
-
-	ctx.stroke();
 
 	if (closedPath)
 	{
@@ -1960,6 +1957,7 @@ let Init = function ()
 	gShipObject.setKilledBy(types.CIRCLE);
 	gShipObject.addMinimap(kShipColor);
 	gShipObject.hasTrail = true;
+	gShipObject.trailColor = DarkDarkViolet();
 	gShipObject.isShip = true;
 	ResetShip();
 
