@@ -122,8 +122,9 @@ let sGravitySettingsBest = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 5; //0; //urlParams.get('num');
-const gGravityGameActive = (gNumGravityObjects && gNumGravityObjects > 0);
+let gNumGravityObjects = 5;
+const gameOn = urlParams.get('game');
+const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
 
 /*---------------------------------------------------------------------------*/
@@ -1916,7 +1917,7 @@ let CalcRotationTime = function(deltaMS)
 /*---------------------------------------------------------------------------*/
 let GravityEnabled = function()
 {
-	return (sGravitySettings && gNumGravityObjects);
+	return gGravityGameActive;
 }
 
 /*---------------------------------------------------------------------------*/
