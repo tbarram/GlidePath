@@ -10,7 +10,7 @@ To use:
 
 The objects start out in random locations. The only force on them is 
 gravity - each object applies gravity to each other object based on 
-the well-known gravity equation:
+the standard gravity equation (where G is a constant):
 
    Force = (G * mass1 * mass2) / (distance ^ 2)
 
@@ -27,6 +27,7 @@ to try different starting configurations. For example, try dragging 2 objects
 right next to each other, then watch to see if they can escape each other's 
 orbit, or if they remain "stuck" together - since the distance between them 
 is so small, their gravitational attraction is very big. 
+
 
 The blue thing in the middle is the ship. It has the same mass as all the 
 objects, but it is fixed in the center. This helps the objects stay centered.
