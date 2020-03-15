@@ -25,6 +25,11 @@ function ASSERT(cond, str)
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
+// using the window values causes glitches, so hardcode
+canvas.width = 1200; //window.innerWidth;
+canvas.height = 680; // window.innerHeight;
+document.body.appendChild(canvas);
+
 let lastMouseX = 0;
 let lastMouseY = 0;
 let offsetX = canvas.offsetLeft;
@@ -107,11 +112,6 @@ function handleMouseMove(e)
   	lastMouseY = mouseY;
 }
 
-// using the window values causes glitches, so hardcode
-canvas.width = 1200; //window.innerWidth;
-canvas.height = 680; //window.innerHeight;
-document.body.appendChild(canvas);
-
 // slider positions
 let gVertPos = 40;
 const kRightPos = 160;
@@ -177,33 +177,98 @@ function InitElements()
 	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	sGravitySettings.maxV, 20);
 	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
 
+	let UpdateStartButton = function()
+	{
+		startBtn.innerHTML = gStartGravityObjects ? "STOP" : "START";
+	}
+
 	// add the Reset button
 	var resetBtn = document.getElementById("resetBtn");
 	SetPosition(resetBtn, kRightPosValue, gVertPos);
 	resetBtn.onclick = function() {
 		gResetGravityObjects = true;
+		gStartGravityObjects = false;
+		UpdateStartButton();
 	}
 
 	// add the Start button
 	var startBtn = document.getElementById("startBtn");
 	SetPosition(startBtn, kRightPosValue + 60, gVertPos);
 	startBtn.onclick = function() {
-		gStartGravityObjects = true;
+		gStartGravityObjects = !gStartGravityObjects;
+		UpdateStartButton();
+	}
+	UpdateStartButton();
+
+	gVertPos += 30;
+	let showTrails_Label = document.getElementById("showTrails_Label");
+	SetPosition(showTrails_Label, kRightPosValue + 20, gVertPos - 14);
+	showTrails_Label.innerHTML = "Show trails:";
+
+	gVertPos += 34;
+	let trails_Off_Checkbox = document.getElementById("trails_Off_Checkbox");
+	SetPosition(trails_Off_Checkbox, kRightPosValue, gVertPos - 14);
+
+	let trails_Off_Label = document.getElementById("trails_Off_Label");
+	SetPosition(trails_Off_Label, kRightPosValue + 22, gVertPos - 28);
+	trails_Off_Label.innerHTML = "Off";
+
+	gVertPos += 20;
+	let trails_On_Checkbox = document.getElementById("trails_On_Checkbox");
+	SetPosition(trails_On_Checkbox, kRightPosValue, gVertPos - 14);
+
+	let trails_On_Label = document.getElementById("trails_On_Label");
+	SetPosition(trails_On_Label, kRightPosValue + 22, gVertPos - 28);
+	trails_On_Label.innerHTML = "On";
+
+	gVertPos += 20;
+	let trails_Timer_Checkbox = document.getElementById("trails_Timer_Checkbox");
+	SetPosition(trails_Timer_Checkbox, kRightPosValue, gVertPos - 14);
+
+	let trails_Timer_Label = document.getElementById("trails_Timer_Label");
+	SetPosition(trails_Timer_Label, kRightPosValue + 22, gVertPos - 28);
+	trails_Timer_Label.innerHTML = "Timer";
+
+	let trailsTimerID;
+
+	trails_Off_Checkbox.onclick = function() {
+		sGravitySettings.showTrails = false;
+		trails_Off_Checkbox.checked = true;
+		trails_On_Checkbox.checked = false;
+		trails_Timer_Checkbox.checked = false;
+
+		clearInterval(trailsTimerID);
+		trailsTimerID = false;
 	}
 
-	// add the Trail checkbox
-	var trailCheckbox = document.getElementById("trail");
-	SetPosition(trailCheckbox, kRightPosValue + 226, gVertPos);
-	sGravitySettings.showTrails = true; // default
-	trailCheckbox.checked = sGravitySettings.showTrails;
-	trailCheckbox.onclick = function() {
-		sGravitySettings.showTrails = trailCheckbox.checked;
+	trails_On_Checkbox.onclick = function() {
+		sGravitySettings.showTrails = true;
+		trails_Off_Checkbox.checked = false;
+		trails_On_Checkbox.checked = true;
+		trails_Timer_Checkbox.checked = false;
+
+		clearInterval(trailsTimerID);
+		trailsTimerID = false;
 	}
 
-	// label element for the trail checkbox
-	let label = document.getElementById("trail_value");
-	SetPosition(label, kRightPosValue + 130, gVertPos - 14);
-	label.innerHTML = "Show trails";
+	let timerClickAction = function() {
+		trails_On_Checkbox.checked = false;
+		trails_Off_Checkbox.checked = false;
+		trails_Timer_Checkbox.checked = true;
+
+		if (!trailsTimerID)
+		{
+			sGravitySettings.showTrails = !sGravitySettings.showTrails; 
+			trailsTimerID = setInterval(function() 
+			{ 
+				sGravitySettings.showTrails = !sGravitySettings.showTrails; 
+			}, 7000); 
+		}
+	}
+
+	trails_Timer_Checkbox.onclick = timerClickAction;
+	timerClickAction();
+	sGravitySettings.showTrails = true;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -546,11 +611,8 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	updateStartGravity()
 	{
-		if (gStartGravityObjects)
-		{
-			if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
-				this.isFixed = false;
-		}
+		if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
+			this.isFixed = !gStartGravityObjects;
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -788,7 +850,7 @@ let DoBlink = function()
 /*---------------------------------------------------------------------------*/
 let DoShipShadow = function()
 {
-	return (gShipDistanceFromGround < kDistanceGameScoreCutoff) || gThrusting;
+	return (gShipDistanceFromGround < kDistanceGameScoreCutoff) /*|| gThrusting*/;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -827,7 +889,7 @@ let ResetShip = function ()
 	if (gGravityGameActive)
 		gShipObject.y = (canvas.height / 2);
 	else
-		gShipObject.y = 400; // kGroundMidpoint;
+		gShipObject.y = canvas.height - kGroundMidpoint;
 
 	gShipObject.velX = 0;
 	gShipObject.velY = 0;
@@ -1275,22 +1337,19 @@ let ApplyGravity = function(o1, o2)
 	const d = Distance(o1, o2);
 
 	// gravity
-	// g = (G * m1 * m2) / (d ^ 2)
-	let g = (kG * o1.mass * o2.mass) / (d * d);
+	let gravity = (kG * o1.mass * o2.mass) / (d * d);
 
 	// bound it (these bounds have a huge affect on the systen)
-	g = Bound(g, kMinG, kMaxG);
+	gravity = Bound(gravity, kMinG, kMaxG);
 	
 	// get angle between the objects
-	const dx = (o2.x - o1.x);
-	const dy = (o2.y - o1.y);
-	const angle = Math.atan2(dx, dy);
+	const angle = Math.atan2(o2.x - o1.x, o2.y - o1.y);
 
-	// create the acceleration vector
-	const a = {	x: (g * Math.sin(angle)), 
-				y: (g * Math.cos(angle))};
+	// create the gravity acceleration vector
+	const a = {	x: (gravity * Math.sin(angle)), 
+				y: (gravity * Math.cos(angle))};
 	
-	// apply it on each object in opposite directions
+	// apply it to each object in opposite directions
 
 	// object 1
 	o1.accX += a.x;
@@ -1952,7 +2011,7 @@ let Init = function ()
 		// init the a normal integer array
 		for (let i = 0; i < kNumRndColors; ++i) 
 			rndColorIntArray[i] = i;
-		}
+	}
 
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
@@ -2008,7 +2067,6 @@ let DoOneFrame = function ()
 	ShowScoreStats();
 
 	gSwitch = !gSwitch;
-	gStartGravityObjects = false;
 };
 
 /*---------------------------------------------------------------------------*/
