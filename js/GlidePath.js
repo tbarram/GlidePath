@@ -122,7 +122,7 @@ let sGravitySettingsBest = {};
 
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 5;
+let gNumGravityObjects = 7;
 const gameOn = urlParams.get('game');
 const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
@@ -171,11 +171,13 @@ function InitElements()
 	document.getElementById("gravityControls").style.display = "block"
 
 	// add the sliders
+	/*
 	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	sGravitySettings.g, 20);
 	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	sGravitySettings.maxG, 20);
 	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	sGravitySettings.minG, 20);
 	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	sGravitySettings.maxV, 20);
-	AddSlider("numObjects", "Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
+	*/
+	AddSlider("numObjects", "# Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
 
 	let UpdateStartButton = function()
 	{
@@ -203,7 +205,7 @@ function InitElements()
 	gVertPos += 30;
 	let showTrails_Label = document.getElementById("showTrails_Label");
 	SetPosition(showTrails_Label, kRightPosValue + 20, gVertPos - 14);
-	showTrails_Label.innerHTML = "Show trails:";
+	showTrails_Label.innerHTML = "Trails:";
 
 	gVertPos += 34;
 	let trails_Off_Checkbox = document.getElementById("trails_Off_Checkbox");
