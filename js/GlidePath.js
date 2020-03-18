@@ -139,14 +139,16 @@ let SetPosition = function(el, right, vert)
 // util function for adding a slider element
 let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 {
-	// slider element
-	let s = document.getElementById(id);
-	SetPosition(s, kRightPos, gVertPos);
-
 	// label element for the slider
 	const labelElementName = (id + "_value"); // convention in HTML
 	let s_val = document.getElementById(labelElementName);
 	SetPosition(s_val, kRightPosValue, (gVertPos - kValueVertOffset));
+
+	gVertPos += 20;
+
+	// slider element
+	let s = document.getElementById(id);
+	SetPosition(s, kRightPosValue, gVertPos);
 
 	let update = function(val)
 	{
