@@ -165,44 +165,9 @@ let AddSlider = function(id, name, setValFunc, initialVal, bottomMargin)
 }
 
 /*---------------------------------------------------------------------------*/
-function InitElements() 
+function InitShowTrailsUI() 
 {
-	// show the controls
-	document.getElementById("gravityControls").style.display = "block"
-
-	// add the sliders
-	/*
-	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	sGravitySettings.g, 20);
-	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	sGravitySettings.maxG, 20);
-	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	sGravitySettings.minG, 20);
-	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	sGravitySettings.maxV, 20);
-	*/
-	AddSlider("numObjects", "# Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
-
-	let UpdateStartButton = function()
-	{
-		startBtn.innerHTML = gStartGravityObjects ? "STOP" : "START";
-	}
-
-	// add the Reset button
-	var resetBtn = document.getElementById("resetBtn");
-	SetPosition(resetBtn, kRightPosValue, gVertPos);
-	resetBtn.onclick = function() {
-		gResetGravityObjects = true;
-		gStartGravityObjects = false;
-		UpdateStartButton();
-	}
-
-	// add the Start button
-	var startBtn = document.getElementById("startBtn");
-	SetPosition(startBtn, kRightPosValue + 60, gVertPos);
-	startBtn.onclick = function() {
-		gStartGravityObjects = !gStartGravityObjects;
-		UpdateStartButton();
-	}
-	UpdateStartButton();
-
-	gVertPos += 30;
+	//gVertPos += 30;
 	let showTrails_Label = document.getElementById("showTrails_Label");
 	SetPosition(showTrails_Label, kRightPosValue + 20, gVertPos - 14);
 	showTrails_Label.innerHTML = "Trails:";
@@ -271,6 +236,48 @@ function InitElements()
 	trails_Timer_Checkbox.onclick = timerClickAction;
 	timerClickAction();
 	sGravitySettings.showTrails = true;
+}
+
+/*---------------------------------------------------------------------------*/
+function InitElements() 
+{
+	// show the controls
+	document.getElementById("gravityControls").style.display = "block";
+
+	InitShowTrailsUI();
+	gVertPos += 30;
+
+	// add the sliders
+	/*
+	AddSlider("gravity", "Gravity", 	(v) => { sGravitySettings.g = v; }, 	sGravitySettings.g, 20);
+	AddSlider("maxG", "MaxG", 			(v) => { sGravitySettings.maxG = v; }, 	sGravitySettings.maxG, 20);
+	AddSlider("minG", "MinG", 			(v) => { sGravitySettings.minG = v; }, 	sGravitySettings.minG, 20);
+	AddSlider("maxV", "MaxV", 			(v) => { sGravitySettings.maxV = v; }, 	sGravitySettings.maxV, 20);
+	*/
+	AddSlider("numObjects", "# Objects", 	(v) => { gNumGravityObjects = v; }, 	gNumGravityObjects, 30);
+
+	let UpdateStartButton = function()
+	{
+		startBtn.innerHTML = gStartGravityObjects ? "STOP" : "START";
+	}
+
+	// add the Reset button
+	var resetBtn = document.getElementById("resetBtn");
+	SetPosition(resetBtn, kRightPosValue, gVertPos);
+	resetBtn.onclick = function() {
+		gResetGravityObjects = true;
+		gStartGravityObjects = false;
+		UpdateStartButton();
+	}
+
+	// add the Start button
+	var startBtn = document.getElementById("startBtn");
+	SetPosition(startBtn, kRightPosValue + 60, gVertPos);
+	startBtn.onclick = function() {
+		gStartGravityObjects = !gStartGravityObjects;
+		UpdateStartButton();
+	}
+	UpdateStartButton();
 }
 
 /*---------------------------------------------------------------------------*/
