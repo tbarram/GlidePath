@@ -37,6 +37,7 @@ let offsetY = canvas.offsetTop;
 let mouseIsDown = false;
 let draggedObject = 0;
 let draggedObjectSavedMass = 0;
+const kDefaultObjectGravity = 30;
 
 /*---------------------------------------------------------------------------*/
 function handleMouseDown(e)
@@ -97,7 +98,7 @@ function handleMouseMove(e)
 
 			// give more mass to dragged obj (& save current val)
 			draggedObjectSavedMass = draggedObject.mass;
-			draggedObject.mass = 140;
+			draggedObject.mass = (kDefaultObjectGravity * 4);
 		}
 
 		// update the dragged object position 
@@ -2000,7 +2001,7 @@ let CreateGravityObjects = function()
 
 		const kNumSameLoc = 1;
 		for (var j = 0; j < kNumSameLoc; j++)
-			NewGravityObject(w, h, sGravitySettings.rnd ? rnd(20,60) : 30);
+			NewGravityObject(w, h, sGravitySettings.rnd ? rnd(20,60) : kDefaultObjectGravity);
 	}
 }
 
