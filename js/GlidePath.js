@@ -26,8 +26,8 @@ let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
 // using the window values causes glitches, so hardcode
-canvas.width = 1200; //window.innerWidth;
-canvas.height = 680; // window.innerHeight;
+canvas.width = window.innerWidth; //1200;
+canvas.height = window.innerHeight; //680; 
 document.body.appendChild(canvas);
 
 let lastMouseX = 0;
@@ -115,8 +115,7 @@ function handleMouseMove(e)
 
 // slider positions
 let gVertPos = 40;
-const kRightPos = 160;
-const kRightPosValue = 50;
+const kRightPosValue = (canvas.width - 180);
 const kValueVertOffset = 14;
 let sGravitySettings = {};
 let sGravitySettingsBest = {};
@@ -132,7 +131,7 @@ const kShipGravityV = 140; // 100
 let SetPosition = function(el, right, vert)
 {
 	el.style.position = "absolute";
-	el.style.right = right + 'px';
+	el.style.left = right + 'px';
 	el.style.top = vert + 'px';
 }
 
@@ -2037,7 +2036,7 @@ let Init = function ()
 	// logo pic
 	let logoPos = {x: 120, y: 120};
 	if (GravityEnabled())
-		logoPos = {x: canvas.width - 150, y: canvas.height - 160};
+		logoPos = {x: canvas.width - 180, y: canvas.height - 160};
 
 	NewImageObject(logoPos.x,logoPos.y,0,0,0,0,'images/GP.png');			
 
