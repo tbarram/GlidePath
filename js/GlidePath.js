@@ -70,13 +70,15 @@ function handleMouseMove(e)
 
   	let targetObject = draggedObject;
 
+  	// if we aren't dragging something, see if we should start
   	if (!targetObject)
   	{
   		// see if the mouse is over any of our objects
+  		const kNearness = 8;
 		for (let i = 0; i < gObjects.length; i++)
 		{
 			let obj = gObjects[i];
-			if (obj.isActive() && obj.isPointInside(mouseX, mouseY, 8))
+			if (obj.isActive() && obj.isPointInside(mouseX, mouseY, kNearness))
 			{
 				targetObject = obj;
 				break;
@@ -92,7 +94,6 @@ function handleMouseMove(e)
 	  	if (targetObject && !draggedObject)
 	  	{
 	  		// we just started dragging
-
 			draggedObject = targetObject;
 			draggedObject.isBeingDragged = true;
 
@@ -123,7 +124,7 @@ let sGravitySettingsBest = {};
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
-const gameOn = urlParams.get('game');
+const gameOn = true; //urlParams.get('game');
 const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
 
@@ -375,7 +376,6 @@ let GoodRandomColor = function()
 const kMaxNumObjects = 512;
 const kRotateSpeed = 8;
 const kThrustSpeed = 647;
-const kGroundMidpoint = 300;
 const kDistanceGameScoreCutoff = 48;
 const kGroundCollisionBuffer = 1;
 const kGroundSpeedBottom = 160;
@@ -408,7 +408,8 @@ const kTrailSize = 256;
 /*---------------------------------------------------------------------------*/
 let gNowMS = Date.now();
 let gObjects = [];
-let gGroundObjects = [];
+let gGroundObjectsTop = [];
+let gGroundObjectsBottom = [];
 let gShipObject = {};
 let gShipDistanceFromGround = 0;
 let gShipAngle = 0;
@@ -418,7 +419,8 @@ let gThrusting = false;
 let gAngleStart = 0;
 let gTotalRotateTimeMS = 0;
 let gShipBlinkEndMS_RotateMS = 0;
-let gLastShipResetMS = 0;
+let gBlinkColor;
+let gPauseThrustAfterShipReset = false;
 let gWasRotating = false;
 let gNumRotations = 0;
 let gNextBlinkMS = 0;
@@ -430,6 +432,7 @@ let gGameState = gGravityGameActive ? eInactive : eWaitingForStart;
 let gScore = 0;
 let gScoreBestAllTime = 0;
 let gScoreEventCounter = new Map();
+let gScoreEventCounterGuide = new Map();
 let gScoreEventCounterBest = new Map();
 let gScoreEventCounterBestAllTime = new Map();
 let gPointsByKeepingLowIndex = 1;
@@ -437,6 +440,7 @@ let gPointsByKeepingLow = 0;
 let gSwitch = false;
 let gResetGravityObjects = false;
 let gStartGravityObjects = true;
+let gFallingObjectsTimer = 0;
 
 let gScoreBest = localStorage.getItem('highScore') | 0;
 
@@ -536,7 +540,8 @@ class Object
 				DrawShip(this);
 				break;
 			case types.GROUND:
-				DrawGroundObject(this);
+				// ground objects are now drawn in DrawGroundObjects
+				CheckNextLine(this);
 				break;
 			case types.TEXT_BUBBLE:
 				DrawTextObject(this);
@@ -575,8 +580,11 @@ class Object
 		// ground objects die when their right endpoint hits the left edge
 		if (this.type === types.GROUND)
 		{
-			if (this.rightX < 0)
+			if (this.rightX < -100)
+			{
 				this.alive = false;
+				RemoveGroundObject(this);
+			}
 			return;
 		}
 
@@ -602,7 +610,13 @@ class Object
 		if (this.hasGravity())
 			this.accX = this.accY = 0;
 	}
-	
+
+	/*---------------------------------------------------------------------------*/
+	updateStartGravity()
+	{
+		if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
+			this.isFixed = !gStartGravityObjects;
+	}
 
 	/*---------------------------------------------------------------------------*/
 	boundVelocity(delta) 
@@ -620,13 +634,6 @@ class Object
 	}
 
 	/*---------------------------------------------------------------------------*/
-	updateStartGravity()
-	{
-		if (this.isGravityObject || (this.parent && this.parent.isGravityObject))
-			this.isFixed = !gStartGravityObjects;
-	}
-
-	/*---------------------------------------------------------------------------*/
 	applyPhysics(delta) 
 	{
 		if (this.isFixed || this.isBeingDragged)
@@ -641,6 +648,10 @@ class Object
 		// apply velocity to position
 		this.x += (this.velX * delta);
 		this.y += (this.velY * delta);
+
+		// update right endpoints (for ground objects)
+		this.rightX = (this.x + this.width); 	
+		this.rightY = (this.y + this.height);
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -853,15 +864,9 @@ let RotateAndDraw = function (verts, pos, color)
 }
 
 /*---------------------------------------------------------------------------*/
-let DoBlink = function()
-{
-	return (gShipBlinkEndMS_RotateMS > gNowMS);
-}
-
-/*---------------------------------------------------------------------------*/
 let DoShipShadow = function()
 {
-	return (gShipDistanceFromGround < kDistanceGameScoreCutoff) /*|| gThrusting*/;
+	return (gShipDistanceFromGround < kDistanceGameScoreCutoff) || gThrusting;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -871,7 +876,7 @@ let ColorForShip = function ()
 	const kBlinkSpeedMS = 100;
 
 	// handle blinking
-	if (DoBlink())
+	if (gShipBlinkEndMS_RotateMS > gNowMS)
 	{
 		if (gNextBlinkMS === 0 || (gNextBlinkMS < gNowMS))
 		{
@@ -879,7 +884,7 @@ let ColorForShip = function ()
 			gNextBlinkMS = (gNowMS + kBlinkSpeedMS);
 		}
 
-		color = gBlink ? gShipObject.color : "white";
+		color = gBlink ? "white" : gBlinkColor;
 	}
 	else
 		gNextBlinkMS = 0;
@@ -900,7 +905,7 @@ let ResetShip = function ()
 	if (gGravityGameActive)
 		gShipObject.y = (canvas.height / 2);
 	else
-		gShipObject.y = canvas.height - kGroundMidpoint;
+		gShipObject.y = gGroundMidpoint;
 
 	gShipObject.velX = 0;
 	gShipObject.velY = 0;
@@ -909,9 +914,10 @@ let ResetShip = function ()
 	
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gTotalRotateTimeMS = 0;
-	gLastShipResetMS = gNowMS;
+	gPauseThrustAfterShipReset = true;
 
-	//gGameState = eEnded;
+	if (gGameState === eStarted)
+		gGameState = eEnded;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1146,11 +1152,14 @@ let ShowScoreStats = function()
 	ctx.font = kScoreText2;
 	ctx.textAlign = "right";
 	
-	const stage = "Current"; //(mDistanceGameStatus == eWaitingForStart ? "Last" : "Current");
+	const stage = (gGameState === eWaitingForStart ? "Last" : "Current");
 	ctx.fillText("--- " + stage + " score: " + gScore + " ---", x, y);
 	y += 16;
 	
-	y = ScoreStatsUI(gScoreEventCounter, x, y);
+	if (gScoreEventCounter.size > 0)
+		y = ScoreStatsUI(gScoreEventCounter, x, y);
+	else
+		y = ScoreStatsUI(gScoreEventCounterGuide, x, y);
 	
 	/*if (mNewDistanceGameScoreBest > 0 &&
 		(!mNewDistanceGameScoreBestAllTime ||
@@ -1243,6 +1252,9 @@ let Explosion = function(p)
 /*---------------------------------------------------------------------------*/
 let NewFallingObject = function()
 {
+	// for now we're not dropping balls
+	return;
+
 	const x = RandomWidth(10, 240); // random horiz start
 	const accelY = rnd(40, 160);	// random vertical (falling) acceleration
 	const size = rnd(8,20);			// random size for the circle
@@ -1252,13 +1264,16 @@ let NewFallingObject = function()
 	obj.lightGradient = rnd(1,3) > 1 ? true : false;
 	obj.gradient = !obj.lightGradient;
 
+	if (gFallingObjectsTimer)
+		clearTimeout(gFallingObjectsTimer);
+
 	// schedule the next one
 	if (gGameState === eStarted)
 	{
 		const elapsedGameTimeMS = (gNowMS - gGameStartTimeMS);
-		const avgNextMS = 400 + 4000 * (1 - ( 1 / elapsedGameTimeMS));
-		//const nextObjectMS = rnd(600, 1000);
-		setTimeout(() => NewFallingObject(), 3500);
+		//const avgNextMS = 400 + 4000 * (1 - ( 1 / elapsedGameTimeMS));
+		const nextMS = 4000; //Math.max(10000 - elapsedGameTimeMS, 1000);
+		gFallingObjectsTimer = setTimeout(() => NewFallingObject(), nextMS);
 	}
 }
 
@@ -1437,7 +1452,10 @@ let DoGame = function()
 		case eWaitingForStart:
 		{
 			ctx.fillText("Waiting For Start", canvas.width/2, 80);
-			ctx.fillText("Last Score: " + gScore, canvas.width/2, 108);
+			if (gScore > 0)
+				ctx.fillText("Last Score: " + gScore, canvas.width/2, 108);
+			else
+				ctx.fillText("Do full 360 degree rotations for points", canvas.width/2, 108);
 			ctx.fillText("Best Score: " + gScoreBest, canvas.width/2, 136);
 			if (gScoreBestAllTime)
 				ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
@@ -1450,16 +1468,27 @@ let DoGame = function()
 
 		case eStarting:
 		{
+			gScore = 0;
+			gScoreEventCounter.clear();
 			gGameState = eStarted;
 			gGameStartTimeMS = gNowMS;
+			//gGameEndTimeMS = gGameStartTimeMS + 8000; // 8 seconds
 			gTotalRotateTimeMS = 0;
-			setTimeout(() => NewFallingObject(), 800);
+			gFallingObjectsTimer = setTimeout(() => NewFallingObject(), 800);
 			break;
 		}
 
 		case eStarted:
 		{
+			//const timeRemainingMS = (gGameEndTimeMS - gNowMS);
+			//if (timeRemainingMS <= 0)
+			//	gGameState = eEnded;
+
 			ctx.fillText("Score: " + gScore, canvas.width/2, 100);
+
+			const elapsedTimeMS = (gNowMS - gGameStartTimeMS);
+			ctx.fillText("Elapsed time: " + (Math.floor(elapsedTimeMS / 1000) + 1), canvas.width/2, 140);
+
 
 			const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
 			if (d > 0)
@@ -1490,8 +1519,9 @@ let DoGame = function()
 				localStorage.setItem('highScore', gScoreBest);
 			}
 
-			gScore = 0;
-			gScoreEventCounter.clear();
+			ResetShip();
+			if (gFallingObjectsTimer)
+				clearTimeout(gFallingObjectsTimer);
 			break;
 		}
 	}
@@ -1599,23 +1629,11 @@ let CheckShipWithSingleGroundObject = function(g)
 }
 
 /*---------------------------------------------------------------------------*/
-let DrawGroundObject = function(obj)
+let CheckNextLine = function(obj)
 {
 	// the position of the line segment is defined as its left endpoint
-
-	// calc the right endpoint of the line segment
-	obj.rightX = (obj.x + obj.width); 	
-	obj.rightY = (obj.y + obj.height);
-	
-	ctx.beginPath();
-	ctx.strokeStyle = kLineColor;
-	ctx.lineWidth = 2;
-	ctx.moveTo(obj.x, obj.y);
-	ctx.lineTo(obj.rightX, obj.rightY);
-	ctx.stroke();
 	
 	// when this line segment's right side hits the right edge, create the next one
-	// TODO: this should be moved outside of this Draw() method
 	if (!obj.hasTriggeredNext && (obj.rightX <= canvas.width))
 	{
 		obj.hasTriggeredNext = true;
@@ -1627,52 +1645,152 @@ let DrawGroundObject = function(obj)
 }
 
 /*---------------------------------------------------------------------------*/
+let NewGroundObject = function(x, y, isBottom, increasing)
+{
+	const velX = (isBottom ? -kGroundSpeedBottom : -kGroundSpeedTop);
+	let obj = new Object(types.GROUND, x, y, velX, 0, 0, 0, 0, 0);
+	InitGround(obj, isBottom, increasing);
+	if (isBottom)
+		gGroundObjectsBottom.push(obj);
+	else
+		gGroundObjectsTop.push(obj);
+}
+
+/*---------------------------------------------------------------------------*/
+let RemoveFromArray = function(obj, array)
+{
+	let i = array.indexOf(obj);
+	if (i > -1) 
+	  	array.splice(i, 1);
+}
+
+/*---------------------------------------------------------------------------*/
+let RemoveGroundObject = function(obj)
+{
+	RemoveFromArray(obj, gGroundObjectsBottom);
+	RemoveFromArray(obj, gGroundObjectsTop);
+}
+
+/*---------------------------------------------------------------------------*/
 let InitGround = function(obj, isBottom, increasing) 
 {
 	obj.isBottom = isBottom;
 	obj.increasing = increasing;
 	obj.hasTriggeredNext = false;
 
-	// how close are the tight corridors
-	const kMinClosenessMax = 64; //32; //100;
-	const kMinClosenessMin = 32; //16;
-	
-	// how far are the widest parts
-	const kMaxDiffMax = 400;
-	const kMaxDiffMin = 30; //240; //200;
-	
-	// fix this - we're applying max to constants
-	const minCloseness = Math.max(kMinClosenessMax, kMinClosenessMin);
-	const maxDiff = Math.max(kMaxDiffMax, kMaxDiffMin);
-	
-	const kUpperLineMin = (kGroundMidpoint + (maxDiff/2));
-	const kUpperLineMax = (kGroundMidpoint + (minCloseness/2));
-	const kLowerLineMin = (kGroundMidpoint - (minCloseness/2));
-	const kLowerLineMax = (kGroundMidpoint - (maxDiff/2));
-	
 	// each ground object is a new line segment
 	// get random values for the width and height of this line segment
 	obj.width = rnd(30, 120);
 	obj.height = rnd(10, 100);
 	
-	// make sure the line segments stay within the above ^^ range
-	const minY = isBottom ? (canvas.height - kLowerLineMin) : (canvas.height - kUpperLineMin);
-	const maxY = isBottom ? (canvas.height - kLowerLineMax) : (canvas.height - kUpperLineMax);
+	// make sure the line segments stay within the range
+	const minY = isBottom ? gLowerLineMin : gUpperLineMin;
+	const maxY = isBottom ? gLowerLineMax : gUpperLineMax;
 	
 	const boundY = increasing ? (obj.y - minY) : (maxY - obj.y);
+	if (obj.height > boundY)
+		console.log("bound " + (increasing ? "upper" : "lower"));
 	obj.height = Math.min(obj.height, boundY);
 	
 	if (increasing)
 		obj.height *= -1.0;
 }
 
+let gCounter = 0;
+let gNextMidpointMoveMS = 0;
+let gGoingUp = false;
+
 /*---------------------------------------------------------------------------*/
-let NewGroundObject = function(x, y, isBottom, increasing)
+let DrawHorizLine = function(y)
 {
-	const velX = (isBottom ? -kGroundSpeedBottom : -kGroundSpeedTop);
-	let obj = new Object(types.GROUND, x, y, velX, 0, 0, 0, 0, 0);
-	InitGround(obj, isBottom, increasing);
-	gGroundObjects.push(obj);
+	ctx.beginPath();
+	ctx.moveTo(0, y);
+	ctx.lineTo(canvas.width, y);
+	ctx.stroke();
+}
+
+/*---------------------------------------------------------------------------*/
+let DrawDebugGroundLines = function()
+{
+	ctx.save();
+	ctx.strokeStyle = kLineColor;
+	ctx.lineWidth = 1;
+	ctx.globalAlpha = 0.2;
+	ctx.setLineDash([5, 3]);/*dashes are 5px and spaces are 3px*/
+
+	DrawHorizLine(gGroundMidpoint);
+	DrawHorizLine(gUpperLineMin);
+	DrawHorizLine(gUpperLineMax);
+	DrawHorizLine(gLowerLineMin);
+	DrawHorizLine(gLowerLineMax);
+	ctx.restore();
+}
+
+/*---------------------------------------------------------------------------*/
+let gUpperLineMin = 0;
+let gUpperLineMax = 0;
+let gLowerLineMin = 0;
+let gLowerLineMax = 0;
+
+const kGroundMidpointOrig = 400;
+const kMinClosenessOrig = 50; // 64;
+const kMaxFarnessOrig = 400;
+
+let gGroundMidpoint = kGroundMidpointOrig;
+let gMinCloseness = kMinClosenessOrig;
+let gMaxFarness = kMaxFarnessOrig;
+
+/*---------------------------------------------------------------------------*/
+let DrawAndUpdateGround = function()
+{
+	DrawGroundObjects(gGroundObjectsBottom);
+	DrawGroundObjects(gGroundObjectsTop);
+
+	// update the midpoint
+	//if (gNowMS > gNextMidpointMoveMS)
+	if (false)
+	{
+		if ((gCounter++ % 4) === 0)
+		{
+			gGroundMidpoint += (gGoingUp ? 1 : -1);
+			if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > 50)
+			{
+				gGoingUp = !gGoingUp;
+				gNextMidpointMoveMS = (gNowMS + 30000);
+			}
+		}
+	}
+
+	// update the bounds
+	// gMinCloseness, kMinClosenessOrig;
+	// gMaxFarness, kMaxFarnessOrig;
+
+	gUpperLineMin = gGroundMidpoint - (gMaxFarness/2); 
+	gUpperLineMax = gGroundMidpoint - (gMinCloseness/2); 
+	gLowerLineMin = gGroundMidpoint + (gMinCloseness/2);
+	gLowerLineMax = gGroundMidpoint + (gMaxFarness/2);
+
+	DrawDebugGroundLines();
+}
+
+/*---------------------------------------------------------------------------*/
+let DrawGroundObjects = function(groundObjects)
+{
+  	ctx.beginPath();
+	ctx.strokeStyle = kLineColor;
+	ctx.lineWidth = 2;
+	ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+	for (let i = 0; i < groundObjects.length; i++) 
+  	{
+  		const g = groundObjects[i];
+
+		if (i === 0)
+			ctx.moveTo(g.rightX, g.rightY);
+		else
+			ctx.lineTo(g.rightX, g.rightY);
+  	}
+  	ctx.stroke();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1704,8 +1822,8 @@ let RotationScore = function (numRotations)
 /*---------------------------------------------------------------------------*/
 let ShipRotated = function ()
 {
-	gNumRotations++;
-	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
+	gBlinkColor = gNumRotations <= 1 ? gShipObject.color : "red";
+	gShipBlinkEndMS_RotateMS = (gNowMS + (gNumRotations <= 1 ? 800 : 1600));
 	RotationScore(gNumRotations);
 }
 
@@ -1730,7 +1848,10 @@ let CheckRotation = function (isRotating)
 			
 			// see if we have crossed the threshold
 			if (angularChange > nextRotationThreshold)
+			{
+				gNumRotations++;
 				ShipRotated();
+			}
 		}
 	}
 	else
@@ -1745,8 +1866,8 @@ let CheckRotation = function (isRotating)
 /*---------------------------------------------------------------------------*/
 // keyboard input
 let gKeysDown = {};
-addEventListener("keydown", (e) => { gKeysDown[e.keyCode] = true; }, false);
-addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; }, false);
+addEventListener("keydown", (e) => { gKeysDown[e.keyCode] = true; e.preventDefault(); }, false);
+addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; e.preventDefault(); }, false);
 
 const _Z_ = 90;
 const _X_ = 88;
@@ -1756,20 +1877,52 @@ const _RightArrow_ = 39;
 let KeyDown = function(key) { return key in gKeysDown; }
 
 /*---------------------------------------------------------------------------*/
+let gLastKeyTime = new Array;
+
+/*---------------------------------------------------------------------------*/
+// returns the key press if it has been ms since last pressed
+let KeyDownThrottled = function(key, ms)
+{
+	if (KeyDown(key))
+	{
+		let lastKeyMS = gLastKeyTime[key];
+		if (!lastKeyMS || (gNowMS - lastKeyMS) > ms)
+		{
+			gLastKeyTime[key] = gNowMS;
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/*---------------------------------------------------------------------------*/
 let GetUserInput = function (deltaMS) 
 {
 	const delta = (deltaMS / 1000);
+
+	// assume not thrusting
 	gThrusting = false;
 
 	// see if we're thrusting - 'z' || up arrow
-	if (KeyDown(_Z_) || KeyDown(_UpArrow_)) 
+	if (KeyDown(_Z_) || KeyDown(_UpArrow_))
 	{ 	
-		gThrusting = true;
-		gShipObject.isFixed = false;
+		// after a ship reset, wait for the thrust key to be released before
+		// using it - this way you don't start out thrusting after a reset
+		if (!gPauseThrustAfterShipReset)
+		{
+			gThrusting = true;
+			gShipObject.isFixed = false;
 
-		// apply thrust to velocity
-		gShipObject.velY -= (gShipAngleCos * kThrustSpeed * delta);
-		gShipObject.velX += (gShipAngleSin * kThrustSpeed * delta);
+			// apply thrust to velocity
+			gShipObject.velY -= (gShipAngleCos * kThrustSpeed * delta);
+			gShipObject.velX += (gShipAngleSin * kThrustSpeed * delta);
+		}
+	}
+	else
+	{
+		// clear the flag once the thrust keys are released
+		gPauseThrustAfterShipReset = false;
 	}
 
 	// some horiz friction 
@@ -1778,14 +1931,8 @@ let GetUserInput = function (deltaMS)
 		gShipObject.accX = (gShipObject.velX > 0) ? -10 : 10;
 
 	// check shoot key
-	if (KeyDown(_X_)) 
-	{
-		if (gNowMS - gLastShootMS > 50)
-		{
-			gLastShootMS = gNowMS;
-			ShootBullets(gShipObject);
-		}
-	}
+	if (KeyDownThrottled(_X_, 500)) 
+		ShootBullets(gShipObject);
 
 	// check arrow keys for rotation
 	const rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
@@ -1907,7 +2054,7 @@ let DoObjectPairInteractions = function()
 /*---------------------------------------------------------------------------*/
 let DrawText = function () 
 {
-	return;
+	//return;
 
 	// text in lower left
   	ctx.fillStyle = kTextColor;
@@ -1915,6 +2062,12 @@ let DrawText = function ()
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
 
+	const leftTextStart = (canvas.width - 260);
+	ctx.fillText("Left / Right arrows to rotate", leftTextStart, canvas.height - 80);
+	ctx.fillText("Z or Up arrow to thrust", leftTextStart, canvas.height - 60);
+	ctx.fillText("X to shoot", leftTextStart, canvas.height - 40);
+
+	/*
 	const diffMS = gGameStartTimeMS > 0 ? (gNowMS - gGameStartTimeMS) : 0;
 	const percentageRotate = gTotalRotateTimeMS * 100 / diffMS;
 
@@ -1929,6 +2082,8 @@ let DrawText = function ()
 					", diff: " + diffMS.toFixed() +
 					", percentageRotate: " + percentageRotate.toFixed(0)) : ""),
 				24, canvas.height - 24);
+	*/
+	
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2051,9 +2206,13 @@ let Init = function ()
 	else
 	{
 		// start the lower & upper ground objects
-		NewGroundObject(canvas.width, canvas.height - 20, kBottom, true);
+		NewGroundObject(canvas.width, canvas.height - 100, kBottom, true);
 		NewGroundObject(canvas.width, canvas.height - 400, kTop, true);
 	}
+
+	gScoreEventCounterGuide.set(scores.eSingleRotate, 0);
+	gScoreEventCounterGuide.set(scores.eDoubleRotate, 0);
+	gScoreEventCounterGuide.set(scores.eStayedLow, 0);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2067,6 +2226,7 @@ let DoOneFrame = function ()
 	// do the work
 	ClearCanvas();
 	DrawMiniMap();
+	DrawAndUpdateGround();
 	CalcRotationTime(deltaMS);
 	GetUserInput(deltaMS);
 	DoObjectPairInteractions();
