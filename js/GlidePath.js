@@ -124,7 +124,7 @@ let sGravitySettingsBest = {};
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
-const gameOn = true; //urlParams.get('game');
+const gameOn = urlParams.get('game');
 const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
 
@@ -892,6 +892,11 @@ let ColorForShip = function ()
 	return color;
 }
 
+let gNextFakeRotateMS = 0;
+let gFakeRotateUntilMS = 0;
+let gFakeRotate = 0;
+let gFakeRotateJustLoaded = true;
+
 /*---------------------------------------------------------------------------*/
 let ResetShip = function () 
 {
@@ -915,6 +920,7 @@ let ResetShip = function ()
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gTotalRotateTimeMS = 0;
 	gPauseThrustAfterShipReset = true;
+	gNextFakeRotateMS = (gNowMS + (gFakeRotateJustLoaded ? 5000 : 12000));
 
 	if (gGameState === eStarted)
 		gGameState = eEnded;
@@ -1733,8 +1739,8 @@ let gLowerLineMin = 0;
 let gLowerLineMax = 0;
 
 const kGroundMidpointOrig = 400;
-const kMinClosenessOrig = 50; // 64;
-const kMaxFarnessOrig = 400;
+const kMinClosenessOrig = 40; //50; // 64;
+const kMaxFarnessOrig = 320; //400;
 
 let gGroundMidpoint = kGroundMidpointOrig;
 let gMinCloseness = kMinClosenessOrig;
@@ -1770,7 +1776,7 @@ let DrawAndUpdateGround = function()
 	gLowerLineMin = gGroundMidpoint + (gMinCloseness/2);
 	gLowerLineMax = gGroundMidpoint + (gMaxFarness/2);
 
-	DrawDebugGroundLines();
+	//DrawDebugGroundLines();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1895,11 +1901,43 @@ let KeyDownThrottled = function(key, ms)
 	return false;
 }
 
+/*---------------------------------------------------------------------------*/
+let IsValidAndPastMS = function (timeMS)
+{
+	return (timeMS !== 0 && (timeMS < gNowMS));
+}
+
+/*---------------------------------------------------------------------------*/
+let UpdateFakeRotateState = function (someKeyDown)
+{
+	if (someKeyDown)
+	{
+		gFakeRotate = 0;
+		gNextFakeRotateMS = 0;
+		gFakeRotateUntilMS = 0;
+		gFakeRotateJustLoaded = false;
+	}
+
+	if (IsValidAndPastMS(gNextFakeRotateMS))
+	{
+		gNextFakeRotateMS = 0;
+		gFakeRotateUntilMS = (gNowMS + 3000);
+		gFakeRotate = (rnd(1,3) === 1 ? 1 : -1);
+	}
+
+	if (IsValidAndPastMS(gFakeRotateUntilMS))
+	{
+		gFakeRotateUntilMS = 0;
+		gFakeRotate = 0;
+		ResetShip();
+	}
+}
 
 /*---------------------------------------------------------------------------*/
 let GetUserInput = function (deltaMS) 
 {
 	const delta = (deltaMS / 1000);
+	let someKeyDown = false;
 
 	// assume not thrusting
 	gThrusting = false;
@@ -1907,6 +1945,7 @@ let GetUserInput = function (deltaMS)
 	// see if we're thrusting - 'z' || up arrow
 	if (KeyDown(_Z_) || KeyDown(_UpArrow_))
 	{ 	
+		someKeyDown = true;
 		// after a ship reset, wait for the thrust key to be released before
 		// using it - this way you don't start out thrusting after a reset
 		if (!gPauseThrustAfterShipReset)
@@ -1935,8 +1974,18 @@ let GetUserInput = function (deltaMS)
 		ShootBullets(gShipObject);
 
 	// check arrow keys for rotation
-	const rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
-	const isRotating = (rotateDir !== 0);
+	let rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
+	let isRotating = (rotateDir !== 0);
+	if (isRotating)
+		someKeyDown = true;
+
+	UpdateFakeRotateState(someKeyDown);
+
+	if (gFakeRotate)
+	{
+		isRotating = true;
+		rotateDir = gFakeRotate;
+	}
 
 	gShipAngle += (kRotateSpeed * delta * rotateDir);
 
