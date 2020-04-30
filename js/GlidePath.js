@@ -126,7 +126,7 @@ let sGravitySettingsBest = {};
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
-const gameOn = true; //urlParams.get('game');
+const gameOn = !urlParams.get('game');
 const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
 
@@ -1471,13 +1471,13 @@ let DoGame = function()
 		case eWaitingForStart:
 		{
 			const txt = gSimulationMode ? "press any key to start" : "Waiting For Start";
-			ctx.fillText(txt, canvas.width/2, 80);
+			ctx.fillText(txt, canvas.width/2, 70);
 
 			const txt2 = gSimulationMode ? "rotate 360 degrees for points" : "Last Score: " + gScore;
-			ctx.fillText(txt2, canvas.width/2, 108);
+			ctx.fillText(txt2, canvas.width/2, 98);
 
 			const txt3 = gSimulationMode ? "nobody has ever pulled off a quintuple rotation" : "Best Score: " + gScoreBest;
-			ctx.fillText(txt3, canvas.width/2, 136);
+			ctx.fillText(txt3, canvas.width/2, 126);
 
 			if (gScoreBestAllTime)
 				ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
@@ -1807,7 +1807,7 @@ let DrawAndUpdateGround = function()
 	if (gLowerLineMax > (canvas.height - 20))
 		gLowerLineMax = (canvas.height - 20);
 
-	DrawDebugGroundLines();
+	//DrawDebugGroundLines();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2311,7 +2311,7 @@ let Init = function ()
 	{
 		// start the lower & upper ground objects
 		NewGroundObject(canvas.width, canvas.height - 100, kBottom, true);
-		NewGroundObject(canvas.width, canvas.height - 400, kTop, true);
+		NewGroundObject(canvas.width, canvas.height - 300, kTop, true);
 	}
 
 	gScoreEventCounterGuide.set(scores.eSingleRotate, 0);
