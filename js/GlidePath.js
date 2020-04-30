@@ -7,7 +7,6 @@ Copyright 2020
 
 ---------------------------------------------------------------------------*/
 
-
 // glide_path namespace
 (function glide_path() { 
 
@@ -38,6 +37,9 @@ let mouseIsDown = false;
 let draggedObject = 0;
 let draggedObjectSavedMass = 0;
 const kDefaultObjectGravity = 30;
+
+let gSimulationMode = true;
+let gNextSimulationMS = 0;
 
 /*---------------------------------------------------------------------------*/
 function handleMouseDown(e)
@@ -124,7 +126,7 @@ let sGravitySettingsBest = {};
 // get query params
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
-const gameOn = urlParams.get('game');
+const gameOn = true; //urlParams.get('game');
 const gGravityGameActive = !gameOn;
 const kShipGravityV = 140; // 100
 
@@ -892,11 +894,6 @@ let ColorForShip = function ()
 	return color;
 }
 
-let gNextFakeRotateMS = 0;
-let gFakeRotateUntilMS = 0;
-let gFakeRotate = 0;
-let gFakeRotateJustLoaded = true;
-
 /*---------------------------------------------------------------------------*/
 let ResetShip = function () 
 {
@@ -920,10 +917,16 @@ let ResetShip = function ()
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gTotalRotateTimeMS = 0;
 	gPauseThrustAfterShipReset = true;
-	gNextFakeRotateMS = (gNowMS + (gFakeRotateJustLoaded ? 5000 : 12000));
+	ResetNetSimulationStart();
 
 	if (gGameState === eStarted)
 		gGameState = eEnded;
+}
+
+/*---------------------------------------------------------------------------*/
+let ResetNetSimulationStart = function()
+{
+	gNextSimulationMS = (gNowMS + 12000);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1086,16 +1089,17 @@ let ScoreForEvent = function(ev)
 {
 	switch (ev)
 	{
-		case scores.eRescuedHostage: 			return 2000;
 		case scores.eSingleRotate: 				return 500;
-		case scores.eDoubleRotate: 				return 1200;
-		case scores.eTripleRotate: 				return 2000;
+		case scores.eDoubleRotate: 				return 1500;
+		case scores.eTripleRotate: 				return 3000;
 		case scores.eQuadrupleRotate: 			return 5000;
-		case scores.eQuintupleRotate: 			return 12000;
+		case scores.eQuintupleRotate: 			return 12000; // has never happened
+
+		case scores.eRescuedHostage: 			return 2000;
 		case scores.eSingleRotateWithRescue: 	return 4000;
 		case scores.eDoubleRotateWithRescue: 	return 30;
 		case scores.eTripleRotateWithRescue: 	return 50;
-		case scores.eStayedLow:					return 1000;
+		case scores.eStayedLow:					return 600;
 		default: return 0;
 	}
 }
@@ -1105,21 +1109,30 @@ let ScoreEvent = function(ev)
 {
 	// we use isFixed as an "is game active" check
 	// should probably add a new mIsScoringActive let
-	if (gShipObject.isFixed)
+	if (gShipObject.isFixed && !gSimulationMode)
 		return;
+
+	if (gSimulationMode)
+	{
+		if (ev === scores.eStayedLow)
+			return;
+	}
 	
 	const score = ScoreForEvent(ev);
-	gScore += score;
-
-	// update the score event counter
-	const prev = gScoreEventCounter.get(ev);
-	gScoreEventCounter.set(ev, prev ? prev + 1 : 1);
-	
 	let scoreText = ((score > 0 ? "+" : "") + score);
-	
+
+	if (!gSimulationMode)
+	{
+		gScore += score;
+
+		// update the score event counter
+		const prev = gScoreEventCounter.get(ev);
+		gScoreEventCounter.set(ev, prev ? prev + 1 : 1);
+	}
+		
 	// if it's the first time add extra text
 	const firstTime = !!(gScoreEventCounter.get(ev) === 1);
-	if (firstTime)
+	if (firstTime || gSimulationMode)
 		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")!");
 	
 	const color = TextColorForScoreEvent(ev);
@@ -1457,16 +1470,19 @@ let DoGame = function()
 
 		case eWaitingForStart:
 		{
-			ctx.fillText("Waiting For Start", canvas.width/2, 80);
-			if (gScore > 0)
-				ctx.fillText("Last Score: " + gScore, canvas.width/2, 108);
-			else
-				ctx.fillText("Do full 360 degree rotations for points", canvas.width/2, 108);
-			ctx.fillText("Best Score: " + gScoreBest, canvas.width/2, 136);
+			const txt = gSimulationMode ? "press any key to start" : "Waiting For Start";
+			ctx.fillText(txt, canvas.width/2, 80);
+
+			const txt2 = gSimulationMode ? "rotate 360 degrees for points" : "Last Score: " + gScore;
+			ctx.fillText(txt2, canvas.width/2, 108);
+
+			const txt3 = gSimulationMode ? "nobody has ever pulled off a quintuple rotation" : "Best Score: " + gScoreBest;
+			ctx.fillText(txt3, canvas.width/2, 136);
+
 			if (gScoreBestAllTime)
 				ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
 
-			if (gThrusting)
+			if (gThrusting && !gSimulationMode)
 				gGameState = eStarting;
 
 			break;
@@ -1686,16 +1702,25 @@ let InitGround = function(obj, isBottom, increasing)
 
 	// each ground object is a new line segment
 	// get random values for the width and height of this line segment
-	obj.width = rnd(30, 120);
-	obj.height = rnd(10, 100);
+	if (gSimulationMode)
+	{
+		let g = GetGroundCoords();
+		obj.width = g.w;
+		obj.height = g.h;
+	}
+	else
+	{
+		obj.width = rnd(30, 120);
+		obj.height = rnd(10, 100);
+	}
 	
 	// make sure the line segments stay within the range
 	const minY = isBottom ? gLowerLineMin : gUpperLineMin;
 	const maxY = isBottom ? gLowerLineMax : gUpperLineMax;
 	
 	const boundY = increasing ? (obj.y - minY) : (maxY - obj.y);
-	if (obj.height > boundY)
-		console.log("bound " + (increasing ? "upper" : "lower"));
+	//if (obj.height > boundY)
+	//	console.log("bound " + (increasing ? "upper" : "lower"));
 	obj.height = Math.min(obj.height, boundY);
 	
 	if (increasing)
@@ -1739,8 +1764,10 @@ let gLowerLineMin = 0;
 let gLowerLineMax = 0;
 
 const kGroundMidpointOrig = 400;
-const kMinClosenessOrig = 40; //50; // 64;
-const kMaxFarnessOrig = 320; //400;
+const kMinClosenessOrig = 64;
+const kMaxFarnessOrig = 400;
+const kMinClosenessMin = 30;
+const kMaxFarnessMin = 140;
 
 let gGroundMidpoint = kGroundMidpointOrig;
 let gMinCloseness = kMinClosenessOrig;
@@ -1752,7 +1779,7 @@ let DrawAndUpdateGround = function()
 	DrawGroundObjects(gGroundObjectsBottom);
 	DrawGroundObjects(gGroundObjectsTop);
 
-	// update the midpoint
+	// update the bounds
 	//if (gNowMS > gNextMidpointMoveMS)
 	if (false)
 	{
@@ -1762,21 +1789,25 @@ let DrawAndUpdateGround = function()
 			if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > 50)
 			{
 				gGoingUp = !gGoingUp;
-				gNextMidpointMoveMS = (gNowMS + 30000);
+				gNextMidpointMoveMS = (gNowMS + 6000);
 			}
 		}
-	}
 
-	// update the bounds
-	// gMinCloseness, kMinClosenessOrig;
-	// gMaxFarness, kMaxFarnessOrig;
+		if (gMaxFarness >= kMaxFarnessMin)
+			gMaxFarness -= 0.01;
+
+		if (gMinCloseness >= kMinClosenessMin)
+			gMinCloseness -= 0.01;
+	}
 
 	gUpperLineMin = gGroundMidpoint - (gMaxFarness/2); 
 	gUpperLineMax = gGroundMidpoint - (gMinCloseness/2); 
 	gLowerLineMin = gGroundMidpoint + (gMinCloseness/2);
 	gLowerLineMax = gGroundMidpoint + (gMaxFarness/2);
+	if (gLowerLineMax > (canvas.height - 20))
+		gLowerLineMax = (canvas.height - 20);
 
-	//DrawDebugGroundLines();
+	DrawDebugGroundLines();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1872,7 +1903,16 @@ let CheckRotation = function (isRotating)
 /*---------------------------------------------------------------------------*/
 // keyboard input
 let gKeysDown = {};
-addEventListener("keydown", (e) => { gKeysDown[e.keyCode] = true; e.preventDefault(); }, false);
+addEventListener("keydown", (e) => 
+	{ 
+		gKeysDown[e.keyCode] = true; 
+		e.preventDefault(); 	
+		if (gSimulationMode)
+		{
+			gSimulationMode = false; 
+			ResetShip();
+		}
+	}, false);
 addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; e.preventDefault(); }, false);
 
 const _Z_ = 90;
@@ -1907,31 +1947,8 @@ let IsValidAndPastMS = function (timeMS)
 	return (timeMS !== 0 && (timeMS < gNowMS));
 }
 
-/*---------------------------------------------------------------------------*/
-let UpdateFakeRotateState = function (someKeyDown)
-{
-	if (someKeyDown)
-	{
-		gFakeRotate = 0;
-		gNextFakeRotateMS = 0;
-		gFakeRotateUntilMS = 0;
-		gFakeRotateJustLoaded = false;
-	}
 
-	if (IsValidAndPastMS(gNextFakeRotateMS))
-	{
-		gNextFakeRotateMS = 0;
-		gFakeRotateUntilMS = (gNowMS + 3000);
-		gFakeRotate = (rnd(1,3) === 1 ? 1 : -1);
-	}
-
-	if (IsValidAndPastMS(gFakeRotateUntilMS))
-	{
-		gFakeRotateUntilMS = 0;
-		gFakeRotate = 0;
-		ResetShip();
-	}
-}
+let previousAngle = 0;
 
 /*---------------------------------------------------------------------------*/
 let GetUserInput = function (deltaMS) 
@@ -1939,13 +1956,14 @@ let GetUserInput = function (deltaMS)
 	const delta = (deltaMS / 1000);
 	let someKeyDown = false;
 
-	// assume not thrusting
+	// assume not
 	gThrusting = false;
 
-	// see if we're thrusting - 'z' || up arrow
+	// check thrusting keys
 	if (KeyDown(_Z_) || KeyDown(_UpArrow_))
 	{ 	
 		someKeyDown = true;
+
 		// after a ship reset, wait for the thrust key to be released before
 		// using it - this way you don't start out thrusting after a reset
 		if (!gPauseThrustAfterShipReset)
@@ -1971,23 +1989,48 @@ let GetUserInput = function (deltaMS)
 
 	// check shoot key
 	if (KeyDownThrottled(_X_, 500)) 
+	{
+		someKeyDown = true;
 		ShootBullets(gShipObject);
+	}
 
 	// check arrow keys for rotation
 	let rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
 	let isRotating = (rotateDir !== 0);
-	if (isRotating)
-		someKeyDown = true;
-
-	UpdateFakeRotateState(someKeyDown);
-
-	if (gFakeRotate)
-	{
-		isRotating = true;
-		rotateDir = gFakeRotate;
-	}
+	someKeyDown |= isRotating;
 
 	gShipAngle += (kRotateSpeed * delta * rotateDir);
+
+	if (IsValidAndPastMS(gNextSimulationMS))
+	{
+		gNextSimulationMS = 0;
+		gSimulationMode = true;
+	}
+
+	// clear simulation mode when a key gets pressed
+	if (someKeyDown)
+	{
+		gSimulationMode = false;
+		ResetNetSimulationStart();
+	}
+
+	// for generating data for the gShipHistArray array
+	//console.log("new ShipHistObj(" + gShipObject.x.toFixed(2) + "," + gShipObject.y.toFixed(2) + "," + 
+	//					gShipAngle.toFixed(2) + "," + gThrusting + "), ");
+
+	if (gSimulationMode)
+	{
+		let h = gShipHistArray[gShipHistArrayIndex];
+		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArraySize;
+
+		gShipObject.x = h.x;
+		gShipObject.y = h.y;
+		gThrusting = h.thrusting;
+	
+		gShipAngle = h.angle;
+		isRotating = (gShipAngle !== previousAngle);
+		previousAngle = gShipAngle;
+	}
 
 	if (isRotating)
 		CalcSinCosForShip();
@@ -2103,18 +2146,30 @@ let DoObjectPairInteractions = function()
 /*---------------------------------------------------------------------------*/
 let DrawText = function () 
 {
-	//return;
-
-	// text in lower left
+	if (GravityEnabled())
+		return;
+	
   	ctx.fillStyle = kTextColor;
 	ctx.font = "16px Helvetica";
 	ctx.textAlign = "left";
 	ctx.textBaseline = "bottom";
 
+	// lower left
+	//ctx.fillText("Sim mode: " + (gSimulationMode ? "ON":"OFF"), 40, canvas.height - 40);
+
+	// lower right
 	const leftTextStart = (canvas.width - 260);
-	ctx.fillText("Left / Right arrows to rotate", leftTextStart, canvas.height - 80);
-	ctx.fillText("Z or Up arrow to thrust", leftTextStart, canvas.height - 60);
-	ctx.fillText("X to shoot", leftTextStart, canvas.height - 40);
+	ctx.fillText("Left / Right arrows to rotate", leftTextStart, canvas.height - 60);
+	ctx.fillText("Z or Up arrow to thrust", leftTextStart, canvas.height - 40);
+	//ctx.fillText("X to shoot", leftTextStart, canvas.height - 40);
+
+	// "Press any key to start" message
+
+	/*if (gSimulationMode)
+	{
+		ctx.font = "20px Chalkboard";
+		ctx.fillText("Press any key to start!", canvas.width/2, canvas.height - 80);
+	}*/
 
 	/*
 	const diffMS = gGameStartTimeMS > 0 ? (gNowMS - gGameStartTimeMS) : 0;
