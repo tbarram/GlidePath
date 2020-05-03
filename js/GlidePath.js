@@ -40,13 +40,33 @@ const kDefaultObjectGravity = 30;
 
 let gSimulationMode = true;
 let gNextSimulationMS = 0;
+let gLogoImage;
+
+let sGravitySettings = {};
+let sGravitySettingsBest = {};
+
+// get query params
+const urlParams = new URLSearchParams(window.location.search);
+let gNumGravityObjects = 7;
+const gameOn = !urlParams.get('game');
+let gGravityGameActive = !gameOn;
+const kShipGravityV = 140; // 100
 
 /*---------------------------------------------------------------------------*/
 function handleMouseDown(e)
 {
-  	lastMouseX = parseInt(e.clientX - offsetX);
-  	lastMouseY = parseInt(e.clientY - offsetY);
+	const mouseX = parseInt(e.clientX - offsetX);
+  	const mouseY = parseInt(e.clientY - offsetY);
+
+  	lastMouseX = mouseX;
+  	lastMouseY = mouseY;
   	mouseIsDown = true;
+
+  	if (gLogoImage.isPointInside(mouseX, mouseY, 20))
+  	{
+  		gGravityGameActive = !gGravityGameActive;
+  		SwitchScreens();
+  	}
 }
 
 /*---------------------------------------------------------------------------*/
@@ -120,15 +140,6 @@ function handleMouseMove(e)
 let gVertPos = 40;
 const kRightPosValue = (canvas.width - 180);
 const kValueVertOffset = 14;
-let sGravitySettings = {};
-let sGravitySettingsBest = {};
-
-// get query params
-const urlParams = new URLSearchParams(window.location.search);
-let gNumGravityObjects = 7;
-const gameOn = !urlParams.get('game');
-const gGravityGameActive = !gameOn;
-const kShipGravityV = 140; // 100
 
 /*---------------------------------------------------------------------------*/
 let SetPosition = function(el, right, vert)
@@ -244,10 +255,17 @@ function InitShowTrailsUI()
 }
 
 /*---------------------------------------------------------------------------*/
+function ShowHideHtmlElements(show) 
+{
+	let htmlControls = document.getElementById("gravityControls");
+	htmlControls.style.display = show ? "block" : "none";
+}
+
+/*---------------------------------------------------------------------------*/
 function InitElements() 
 {
 	// show the controls
-	document.getElementById("gravityControls").style.display = "block";
+	ShowHideHtmlElements(GravityEnabled());
 
 	InitShowTrailsUI();
 	gVertPos += 30;
@@ -329,6 +347,7 @@ let BlueGray = 			function() { return RGB(163,178,177); }
 let SmokeWhite = 		function() { return RGB(249,245,241); }
 let Aqua = 				function() { return RGB(97,243,206); }
 let WhiteViolet = 		function() { return RGB(241,211,232); }
+let DarkAqua = 			function() { return RGB(70,140,240); }
 
 let rndColorIntArray = [];
 let rndColorIndex = 0;
@@ -369,7 +388,7 @@ let GoodRandomColor = function()
 		case 10: return SmokeWhite();
 		case 11: return Aqua();
 		case 12: return DarkDarkViolet2();
-		default: ASSERT(false);
+		default: ASSERT(false, "index " + i + " out of bounds");
 	}
 }
 
@@ -387,7 +406,7 @@ const kTop = false;
 
 /*---------------------------------------------------------------------------*/
 const kBackgroundColor = RGB(54,61,69);
-const kTextColor = RGB(250,250,250); 
+const kTextColor = SmokeWhite();
 const kShipColor = RGB(20,119,155); 
 const kLineColor = RGB(124,209,12); 
 
@@ -410,10 +429,12 @@ const kTrailSize = 256;
 /*---------------------------------------------------------------------------*/
 let gNowMS = Date.now();
 let gObjects = [];
-let gGroundObjectsTop = [];
-let gGroundObjectsBottom = [];
+let gGroundObjectsTop = new Array;
+let gGroundObjectsBottom = new Array;
+let gGravityObjects = new Array;
 let gShipObject = {};
 let gShipDistanceFromGround = 0;
+let gShipLow = false;
 let gShipAngle = 0;
 let gShipAngleCos = 0;
 let gShipAngleSin = 0;
@@ -518,6 +539,7 @@ class Object
 	{
 		let minimapObj = new Object(types.MINIMAP);
 		minimapObj.parent = this;
+		this.child = minimapObj;
 		minimapObj.minimapColor = color;
 	}
 
@@ -566,16 +588,12 @@ class Object
 			}
 		}
 
-		// gravity objects never die - maybe they should?
-		if (this.isGravityObject)
-			return;
-
 		// check expireTimeMS
-		const expired = (this.expireTimeMS && 
-						 this.expireTimeMS < gNowMS);
-		if (expired)
+		if (IsValidAndPastMS(this.expireTimeMS))
 		{
 			this.alive = false;
+			if (this.child)
+				this.child.alive = false;
 			return;
 		}
 
@@ -689,7 +707,8 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	drawTrail()
 	{
-		if (!this.hasTrail || this.isFixed || !sGravitySettings.showTrails)
+		if (!this.hasTrail || this.isFixed || 
+			!sGravitySettings.showTrails || !GravityEnabled())
 		{
 			this.trail = [];
 			return;
@@ -874,6 +893,7 @@ let DoShipShadow = function()
 /*---------------------------------------------------------------------------*/
 let ColorForShip = function () 
 {
+	//gShipObject.color = gShipLow ? MellowOrange() : kShipColor;
 	let color = gShipObject.color;
 	const kBlinkSpeedMS = 100;
 
@@ -904,7 +924,7 @@ let ResetShip = function ()
 	CalcSinCosForShip();
 
 	gShipObject.x = (canvas.width / 2);
-	if (gGravityGameActive)
+	if (GravityEnabled())
 		gShipObject.y = (canvas.height / 2);
 	else
 		gShipObject.y = gGroundMidpoint;
@@ -913,20 +933,23 @@ let ResetShip = function ()
 	gShipObject.velY = 0;
 	gShipObject.accX = 0;
 	gShipObject.accY = kShipGravityV;
+
+	gShipObject.mass = GravityEnabled() ? sGravitySettings.shipG : 0;
 	
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gTotalRotateTimeMS = 0;
 	gPauseThrustAfterShipReset = true;
-	ResetNetSimulationStart();
+	ResetSimulationStart();
 
 	if (gGameState === eStarted)
 		gGameState = eEnded;
 }
 
 /*---------------------------------------------------------------------------*/
-let ResetNetSimulationStart = function()
+let ResetSimulationStart = function()
 {
-	gNextSimulationMS = (gNowMS + 12000);
+	// go into simulation mode after 12 seconds of inactivity
+	gNextSimulationMS = GravityEnabled() ? 0 : (gNowMS + 12000);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1010,6 +1033,7 @@ let NewTextBubble = function(text, pos, color, first)
 	let obj = new Object(types.TEXT_BUBBLE, p.x, p.y, v.x, v.y, a.x, a.y, color, 0);
 	obj.text = text;
 	obj.setLifetime(first ? 3000 : 1000);
+	gTextBubbleList.push(obj);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1024,11 +1048,11 @@ let TextColorForScoreEvent = function(ev)
 		case scores.eSingleRotate:
 			return "yellow";
 		case scores.eDoubleRotate:
-			return "orange";
+			return MellowOrange(); //"orange";
 		case scores.eTripleRotate:
-			return "red";
+			return DarkAqua();
 		case scores.eQuadrupleRotate:
-			return "blue";
+			return BrightYellow(); //"blue";
 		case scores.eQuintupleRotate:
 			return "purple";
 		case scores.eSingleRotateWithRescue:
@@ -1136,7 +1160,9 @@ let ScoreEvent = function(ev)
 		scoreText = (TextForScoreEvent(ev) + " (" + scoreText + ")!");
 	
 	const color = TextColorForScoreEvent(ev);
-	NewTextBubble(scoreText, gShipObject, color, firstTime);
+
+	if (!gSimulationMode)
+		NewTextBubble(scoreText, gShipObject, color, firstTime);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1147,7 +1173,8 @@ let ScoreStatsUI = function(list, x, y)
 		const score = ScoreForEvent(key);
 		const text = LabelForScoreEvent(key) + " (+" + score + ") : " + value;
 
-		ctx.font = "12px Helvetica";
+		const kScoreText3 = "14px Helvetica";
+		ctx.font = kScoreText3;
 		ctx.fillStyle = TextColorForScoreEvent(key);
     	ctx.fillText(text, x, y);
 		y += 16;
@@ -1327,6 +1354,7 @@ let NewGravityObject = function(x, y, mass)
 	obj.hasTrail = true;
 	obj.trailColor = GoodRandomColor();
 	obj.isFixed = !gStartGravityObjects;
+	return obj;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1334,7 +1362,7 @@ let Distance = function(o1, o2)
 {
 	const dx = (o2.x - o1.x);
 	const dy = (o2.y - o1.y);
-	return Math.sqrt((dx * dx) + (dy * dy));
+	return Math.hypot(dx, dy);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1408,7 +1436,9 @@ let ApplyGravity = function(o1, o2)
 /*---------------------------------------------------------------------------*/
 const kMinimapHeight = 40;
 const kMinimapOuterRatio = 4;
-const kMiniMapTopLeftCorner = {mX: 130, mY: 80};
+//const kMiniMapTopLeftCorner = {mX: 130, mY: 80};
+//const kMiniMapTopLeftCorner = {mX: canvas.width - 230, mY: canvas.height - 140};
+const kMiniMapTopLeftCorner = {mX: 130, mY: canvas.height - 140};
 
 /*---------------------------------------------------------------------------*/
 const kMinimapWidth = canvas.width * kMinimapHeight / canvas.height;
@@ -1422,20 +1452,20 @@ const kMiniMapOuterTopLeftCorner = {mX: kMiniMapCenter.mX - (kMinimapOuterWidth/
 /*---------------------------------------------------------------------------*/
 let DrawMiniMap = function () 
 {
-	if (GravityEnabled())
-	{
-		ctx.strokeStyle = kLineColor;
+	if (!GravityEnabled())
+		return;
 
-		// inner rect
-		ctx.beginPath();
-		ctx.rect(kMiniMapTopLeftCorner.mX, kMiniMapTopLeftCorner.mY, kMinimapWidth, kMinimapHeight);
-		ctx.stroke();
+	ctx.strokeStyle = kLineColor;
 
-		// outer rect
-		ctx.beginPath();
-		ctx.rect(kMiniMapOuterTopLeftCorner.mX, kMiniMapOuterTopLeftCorner.mY, kMinimapOuterWidth, kMinimapOuterHeight);
-		ctx.stroke();
-	}
+	// inner rect
+	ctx.beginPath();
+	ctx.rect(kMiniMapTopLeftCorner.mX, kMiniMapTopLeftCorner.mY, kMinimapWidth, kMinimapHeight);
+	ctx.stroke();
+
+	// outer rect
+	ctx.beginPath();
+	ctx.rect(kMiniMapOuterTopLeftCorner.mX, kMiniMapOuterTopLeftCorner.mY, kMinimapOuterWidth, kMinimapOuterHeight);
+	ctx.stroke();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1452,13 +1482,49 @@ let GetMinimapPosition = function(p)
 	return {x:x, y:y};
 }
 
+let gPressNextKeyBlinkMS = gNowMS;
+let gDoPressNextKey = false;
+
+/*---------------------------------------------------------------------------*/
+let DoWaitingForStartText = function()
+{
+	const txt = gSimulationMode ? "SCORE POINTS BY DOING ROTATIONS" : "Waiting For Start";
+	ctx.fillText(txt, canvas.width/2, 70);
+
+	const txt2 = "( use L/R arrows to rotate, 'Z' to thrust )"
+	ctx.fillText(txt2, canvas.width/2, 107);
+
+	//const txt3 = gSimulationMode ? "NO ONE HAS EVER PULLED OFF A QUINTUPLE ROTATION!" : "Best Score: " + gScoreBest;
+
+	if (gScoreBestAllTime)
+		ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
+
+	if (gSimulationMode)
+	{
+		if (gDoPressNextKey)
+		{
+			ctx.save();
+			ctx.fillStyle = "red";
+			ctx.font = "28px Chalkboard";
+			ctx.fillText("PRESS ANY KEY TO START", canvas.width/2, canvas.height - 100);
+			ctx.restore();
+		}
+
+		if (IsValidAndPastMS(gPressNextKeyBlinkMS))
+		{
+			gDoPressNextKey = !gDoPressNextKey;
+			gPressNextKeyBlinkMS = (gNowMS + 700);
+		}
+	}
+}
+
 /*---------------------------------------------------------------------------*/
 let DoGame = function()
 {
-	if (gGravityGameActive)
+	if (GravityEnabled())
 		return;
 
-	ctx.fillStyle = "white";
+	ctx.fillStyle = SmokeWhite();
 	ctx.font = "20px Chalkboard";
 	ctx.textAlign = "center";
 	ctx.textBaseline = "bottom";
@@ -1470,17 +1536,7 @@ let DoGame = function()
 
 		case eWaitingForStart:
 		{
-			const txt = gSimulationMode ? "press any key to start" : "Waiting For Start";
-			ctx.fillText(txt, canvas.width/2, 70);
-
-			const txt2 = gSimulationMode ? "rotate 360 degrees for points" : "Last Score: " + gScore;
-			ctx.fillText(txt2, canvas.width/2, 98);
-
-			const txt3 = gSimulationMode ? "nobody has ever pulled off a quintuple rotation" : "Best Score: " + gScoreBest;
-			ctx.fillText(txt3, canvas.width/2, 126);
-
-			if (gScoreBestAllTime)
-				ctx.fillText("Best All-time Score: " + gScoreBestAllTime, canvas.width/2, 164);
+			DoWaitingForStartText();
 
 			if (gThrusting && !gSimulationMode)
 				gGameState = eStarting;
@@ -1511,9 +1567,9 @@ let DoGame = function()
 			const elapsedTimeMS = (gNowMS - gGameStartTimeMS);
 			ctx.fillText("Elapsed time: " + (Math.floor(elapsedTimeMS / 1000) + 1), canvas.width/2, 140);
 
-
 			const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
-			if (d > 0)
+			gShipLow = (d > 0);
+			if (gShipLow)
 			{
 				const nextTextBubblePoints = (gPointsByKeepingLowIndex * 1000);
 				
@@ -1763,8 +1819,12 @@ let gUpperLineMax = 0;
 let gLowerLineMin = 0;
 let gLowerLineMax = 0;
 
-const kGroundMidpointOrig = 400;
-const kMinClosenessOrig = 64;
+// the data in the gShipHistArray was recorded with gGroundMidpoint == 400,
+// so we need to offset it if gGroundMidpoint changes
+const kSimulationModeYOffset = 400;
+const kGroundMidpointHeight = 300;
+const kGroundMidpointOrig = (canvas.height - kGroundMidpointHeight);
+const kMinClosenessOrig = 84; //64;
 const kMaxFarnessOrig = 400;
 const kMinClosenessMin = 30;
 const kMaxFarnessMin = 140;
@@ -1786,18 +1846,18 @@ let DrawAndUpdateGround = function()
 		if ((gCounter++ % 4) === 0)
 		{
 			gGroundMidpoint += (gGoingUp ? 1 : -1);
-			if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > 50)
+			if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > 150)
 			{
 				gGoingUp = !gGoingUp;
-				gNextMidpointMoveMS = (gNowMS + 6000);
+				gNextMidpointMoveMS = (gNowMS + 0);
 			}
 		}
 
 		if (gMaxFarness >= kMaxFarnessMin)
-			gMaxFarness -= 0.01;
+			gMaxFarness += 0.01;
 
 		if (gMinCloseness >= kMinClosenessMin)
-			gMinCloseness -= 0.01;
+			gMinCloseness += 0.01;
 	}
 
 	gUpperLineMin = gGroundMidpoint - (gMaxFarness/2); 
@@ -1807,7 +1867,8 @@ let DrawAndUpdateGround = function()
 	if (gLowerLineMax > (canvas.height - 20))
 		gLowerLineMax = (canvas.height - 20);
 
-	//DrawDebugGroundLines();
+	if (!GravityEnabled())
+		DrawDebugGroundLines();
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1907,12 +1968,22 @@ addEventListener("keydown", (e) =>
 	{ 
 		gKeysDown[e.keyCode] = true; 
 		e.preventDefault(); 	
+
+		// switch out of simulation mode
 		if (gSimulationMode)
 		{
 			gSimulationMode = false; 
 			ResetShip();
+
+			// kill any text bubbles created during simulation mode
+			gTextBubbleList.forEach(obj => obj.setLifetime(0));
+			gTextBubbleList.clear();
 		}
+
+		ResetSimulationStart();
+
 	}, false);
+
 addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; e.preventDefault(); }, false);
 
 const _Z_ = 90;
@@ -1924,6 +1995,7 @@ let KeyDown = function(key) { return key in gKeysDown; }
 
 /*---------------------------------------------------------------------------*/
 let gLastKeyTime = new Array;
+let gTextBubbleList = new Array;
 
 /*---------------------------------------------------------------------------*/
 // returns the key press if it has been ms since last pressed
@@ -2005,13 +2077,7 @@ let GetUserInput = function (deltaMS)
 	{
 		gNextSimulationMS = 0;
 		gSimulationMode = true;
-	}
-
-	// clear simulation mode when a key gets pressed
-	if (someKeyDown)
-	{
-		gSimulationMode = false;
-		ResetNetSimulationStart();
+		gGroundMidpoint = kGroundMidpointOrig;
 	}
 
 	// for generating data for the gShipHistArray array
@@ -2024,7 +2090,7 @@ let GetUserInput = function (deltaMS)
 		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArraySize;
 
 		gShipObject.x = h.x;
-		gShipObject.y = h.y;
+		gShipObject.y = (h.y + gGroundMidpoint - kSimulationModeYOffset);
 		gThrusting = h.thrusting;
 	
 		gShipAngle = h.angle;
@@ -2158,9 +2224,9 @@ let DrawText = function ()
 	//ctx.fillText("Sim mode: " + (gSimulationMode ? "ON":"OFF"), 40, canvas.height - 40);
 
 	// lower right
-	const leftTextStart = (canvas.width - 260);
-	ctx.fillText("Left / Right arrows to rotate", leftTextStart, canvas.height - 60);
-	ctx.fillText("Z or Up arrow to thrust", leftTextStart, canvas.height - 40);
+	const leftTextStart = (canvas.width - 230);
+	ctx.fillText("L / R arrows to rotate", leftTextStart, canvas.height - 60);
+	ctx.fillText("Z to thrust", leftTextStart, canvas.height - 40);
 	//ctx.fillText("X to shoot", leftTextStart, canvas.height - 40);
 
 	// "Press any key to start" message
@@ -2259,8 +2325,60 @@ let CreateGravityObjects = function()
 
 		const kNumSameLoc = 1;
 		for (var j = 0; j < kNumSameLoc; j++)
-			NewGravityObject(w, h, sGravitySettings.rnd ? rnd(20,60) : kDefaultObjectGravity);
+		{
+			let obj = NewGravityObject(w, h, sGravitySettings.rnd ? rnd(20,60) : kDefaultObjectGravity);
+			gGravityObjects.push(obj);
+		}
 	}
+}
+
+/*---------------------------------------------------------------------------*/
+let StopGravityObjects = function()
+{
+	gGravityObjects.forEach(obj => obj.setLifetime(0));
+	gGravityObjects = [];
+}
+
+/*---------------------------------------------------------------------------*/
+let SwitchScreens = function()
+{
+	if (GravityEnabled())
+	{
+		StopGroundObjects();
+		CreateGravityObjects();
+
+		gSimulationMode = false; 
+
+		// kill any text bubbles created during simulation mode
+		gTextBubbleList.forEach(obj => obj.setLifetime(0));
+		gTextBubbleList = [];
+	}
+	else
+	{
+		StopGravityObjects();
+		StartGroundObjects();
+	}
+
+	ResetShip();
+	ShowHideHtmlElements(GravityEnabled());
+}
+
+
+/*---------------------------------------------------------------------------*/
+let StartGroundObjects = function()
+{
+	// start the lower & upper ground objects
+	NewGroundObject(canvas.width, canvas.height - 100, kBottom, true);
+	NewGroundObject(canvas.width, canvas.height - 300, kTop, true);
+}
+
+/*---------------------------------------------------------------------------*/
+let StopGroundObjects = function()
+{
+	gGroundObjectsBottom.forEach(obj => obj.setLifetime(0));
+	gGroundObjectsBottom = [];
+	gGroundObjectsTop.forEach(obj => obj.setLifetime(0));
+	gGroundObjectsTop = [];
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2269,19 +2387,16 @@ let Exit = function () {};
 /*---------------------------------------------------------------------------*/
 let Init = function () 
 {
-	if (gGravityGameActive)
-	{
-		InitElements();
+	InitElements();
 
-		// install mouse event handlers
-		canvas.addEventListener('mousedown', handleMouseDown);
-		canvas.addEventListener('mousemove', handleMouseMove);
-		canvas.addEventListener('mouseup', handleMouseUp);
+	// install mouse event handlers
+	canvas.addEventListener('mousedown', handleMouseDown);
+	canvas.addEventListener('mousemove', handleMouseMove);
+	canvas.addEventListener('mouseup', handleMouseUp);
 
-		// init the a normal integer array
-		for (let i = 0; i < kNumRndColors; ++i) 
-			rndColorIntArray[i] = i;
-	}
+	// init the a normal integer array
+	for (let i = 0; i < kNumRndColors; ++i) 
+		rndColorIntArray[i] = i;
 
 	// create the ship
 	gShipObject = new Object(types.SHIP, 0, 0, 0, 0, 0, 0, kShipColor, 8);
@@ -2294,10 +2409,10 @@ let Init = function ()
 
 	// logo pic
 	let logoPos = {x: 120, y: 120};
-	if (GravityEnabled())
-		logoPos = {x: canvas.width - 180, y: canvas.height - 160};
+	//if (GravityEnabled())
+	//	logoPos = {x: canvas.width - 180, y: canvas.height - 160};
 
-	NewImageObject(logoPos.x,logoPos.y,0,0,0,0,'images/GP.png');			
+	gLogoImage = NewImageObject(logoPos.x,logoPos.y,0,0,0,0,'images/GP.png');
 
 	if (GravityEnabled())
 	{
@@ -2309,13 +2424,12 @@ let Init = function ()
 	}
 	else
 	{
-		// start the lower & upper ground objects
-		NewGroundObject(canvas.width, canvas.height - 100, kBottom, true);
-		NewGroundObject(canvas.width, canvas.height - 300, kTop, true);
+		StartGroundObjects();
 	}
 
 	gScoreEventCounterGuide.set(scores.eSingleRotate, 0);
 	gScoreEventCounterGuide.set(scores.eDoubleRotate, 0);
+	gScoreEventCounterGuide.set(scores.eTripleRotate, 0);
 	gScoreEventCounterGuide.set(scores.eStayedLow, 0);
 }
 
