@@ -398,7 +398,7 @@ const kMaxNumObjects = 512;
 const kRotateSpeed = 8;
 const kThrustSpeed = 647;
 const kDistanceGameScoreCutoff = 48;
-const kGroundCollisionBuffer = 1;
+const kGroundCollisionBuffer = 3;
 const kGroundSpeedBottom = 160;
 const kGroundSpeedTop = 190;
 const kBottom = true;
@@ -893,7 +893,7 @@ let DoShipShadow = function()
 /*---------------------------------------------------------------------------*/
 let ColorForShip = function () 
 {
-	//gShipObject.color = gShipLow ? MellowOrange() : kShipColor;
+	gShipObject.color = gShipLow ? MellowOrange() : kShipColor;
 	let color = gShipObject.color;
 	const kBlinkSpeedMS = 100;
 
@@ -1048,7 +1048,7 @@ let TextColorForScoreEvent = function(ev)
 		case scores.eSingleRotate:
 			return "yellow";
 		case scores.eDoubleRotate:
-			return MellowOrange(); //"orange";
+			return SmokeWhite(); //"orange";
 		case scores.eTripleRotate:
 			return DarkAqua();
 		case scores.eQuadrupleRotate:
@@ -1060,7 +1060,7 @@ let TextColorForScoreEvent = function(ev)
 		case scores.eTripleRotateWithRescue:
 			return "yellow";
 		case scores.eStayedLow:
-			return "white"
+			return MellowOrange();
 		default:
 			return "green"
 	}
@@ -1488,10 +1488,10 @@ let gDoPressNextKey = false;
 /*---------------------------------------------------------------------------*/
 let DoWaitingForStartText = function()
 {
-	const txt = gSimulationMode ? "SCORE POINTS BY DOING ROTATIONS" : "Waiting For Start";
+	const txt = gSimulationMode ? "SCORE POINTS BY STAYING LOW OR DOING ROTATIONS" : "Waiting For Start";
 	ctx.fillText(txt, canvas.width/2, 70);
 
-	const txt2 = "( use L/R arrows to rotate, 'Z' to thrust )"
+	const txt2 = "( use 'Z' to thrust, L/R arrows to rotate )"
 	ctx.fillText(txt2, canvas.width/2, 107);
 
 	//const txt3 = gSimulationMode ? "NO ONE HAS EVER PULLED OFF A QUINTUPLE ROTATION!" : "Best Score: " + gScoreBest;
@@ -1568,8 +1568,7 @@ let DoGame = function()
 			ctx.fillText("Elapsed time: " + (Math.floor(elapsedTimeMS / 1000) + 1), canvas.width/2, 140);
 
 			const d = (kDistanceGameScoreCutoff - gShipDistanceFromGround);
-			gShipLow = (d > 0);
-			if (gShipLow)
+			if (d > 0)
 			{
 				const nextTextBubblePoints = (gPointsByKeepingLowIndex * 1000);
 				
@@ -1609,9 +1608,13 @@ let DoGame = function()
 let CheckShipWithinLines = function()
 {
 	if (gShipObject.isFixed)
+	{	
+		gShipLow = false;
 		return;
+	}
 
-	// reset each frame
+	// reset each frame - we set it to max here, and then check each
+	// line segment to get the min distance
 	gShipDistanceFromGround = INT_MAX;
 
 	// go through all the ground objects and check the ship for each
@@ -1629,6 +1632,8 @@ let CheckShipWithinLines = function()
 			break;
 		}
 	}
+
+	gShipLow = (gShipDistanceFromGround < kDistanceGameScoreCutoff);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -1757,8 +1762,7 @@ let InitGround = function(obj, isBottom, increasing)
 	obj.hasTriggeredNext = false;
 
 	// each ground object is a new line segment
-	// get random values for the width and height of this line segment
-	if (gSimulationMode)
+	if (false/*gSimulationMode*/)
 	{
 		let g = GetGroundCoords();
 		obj.width = g.w;
@@ -1766,6 +1770,7 @@ let InitGround = function(obj, isBottom, increasing)
 	}
 	else
 	{
+		// get random values for the width and height of this line segment
 		obj.width = rnd(30, 120);
 		obj.height = rnd(10, 100);
 	}
@@ -1782,10 +1787,6 @@ let InitGround = function(obj, isBottom, increasing)
 	if (increasing)
 		obj.height *= -1.0;
 }
-
-let gCounter = 0;
-let gNextMidpointMoveMS = 0;
-let gGoingUp = false;
 
 /*---------------------------------------------------------------------------*/
 let DrawHorizLine = function(y)
@@ -1813,6 +1814,9 @@ let DrawDebugGroundLines = function()
 	ctx.restore();
 }
 
+let gNextMidpointMoveMS = 0;
+let gGoingUp = false;
+
 /*---------------------------------------------------------------------------*/
 let gUpperLineMin = 0;
 let gUpperLineMax = 0;
@@ -1822,12 +1826,23 @@ let gLowerLineMax = 0;
 // the data in the gShipHistArray was recorded with gGroundMidpoint == 400,
 // so we need to offset it if gGroundMidpoint changes
 const kSimulationModeYOffset = 400;
-const kGroundMidpointHeight = 300;
+const kGroundMidpointHeight = 500;
 const kGroundMidpointOrig = (canvas.height - kGroundMidpointHeight);
-const kMinClosenessOrig = 84; //64;
-const kMaxFarnessOrig = 400;
-const kMinClosenessMin = 30;
-const kMaxFarnessMin = 140;
+
+// how far away from center we go before turning around
+const kGroundMidpointRange = 250;
+
+// how long to pause at the top and bottom of the range
+const kGroundMidpointPeakPauseMS = 4000;
+
+// how fast the lines move
+const kGroundMidpointSpeed = 0.25;
+
+// note: this can't be too small if the lines are moving fast
+const kMinClosenessOrig = 50; //50; //84; //64;
+const kMaxFarnessOrig = 200; //400;
+const kMinClosenessMin = 30; // good min - anything smaller is too hard
+const kMaxFarnessMin = 200;
 
 let gGroundMidpoint = kGroundMidpointOrig;
 let gMinCloseness = kMinClosenessOrig;
@@ -1840,24 +1855,22 @@ let DrawAndUpdateGround = function()
 	DrawGroundObjects(gGroundObjectsTop);
 
 	// update the bounds
-	//if (gNowMS > gNextMidpointMoveMS)
-	if (false)
+	if (kGroundMidpointRange > 0 && (gNowMS > gNextMidpointMoveMS))
+	//if (false)
 	{
-		if ((gCounter++ % 4) === 0)
+		const speed = (kGroundMidpointSpeed * (gGoingUp ? 1.0 : -1.0));
+		gGroundMidpoint += speed;
+		if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > kGroundMidpointRange)
 		{
-			gGroundMidpoint += (gGoingUp ? 1 : -1);
-			if (Math.abs(gGroundMidpoint - kGroundMidpointOrig) > 150)
-			{
-				gGoingUp = !gGoingUp;
-				gNextMidpointMoveMS = (gNowMS + 0);
-			}
+			gGoingUp = !gGoingUp;
+			gNextMidpointMoveMS = (gNowMS + kGroundMidpointPeakPauseMS);
 		}
 
-		if (gMaxFarness >= kMaxFarnessMin)
-			gMaxFarness += 0.01;
+		//if (gMaxFarness >= kMaxFarnessMin)
+		//	gMaxFarness += 0.01;
 
-		if (gMinCloseness >= kMinClosenessMin)
-			gMinCloseness += 0.01;
+		//if (gMinCloseness >= kMinClosenessMin)
+		//	gMinCloseness += 0.01;
 	}
 
 	gUpperLineMin = gGroundMidpoint - (gMaxFarness/2); 
@@ -2081,13 +2094,13 @@ let GetUserInput = function (deltaMS)
 	}
 
 	// for generating data for the gShipHistArray array
-	//console.log("new ShipHistObj(" + gShipObject.x.toFixed(2) + "," + gShipObject.y.toFixed(2) + "," + 
-	//					gShipAngle.toFixed(2) + "," + gThrusting + "), ");
+	console.log("new ShipHist(" + gShipObject.x.toFixed(2) + "," + gShipObject.y.toFixed(2) + "," + 
+						gShipAngle.toFixed(2) + "," + gThrusting + "), ");
 
 	if (gSimulationMode)
 	{
 		let h = gShipHistArray[gShipHistArrayIndex];
-		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArraySize;
+		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArray.length;
 
 		gShipObject.x = h.x;
 		gShipObject.y = (h.y + gGroundMidpoint - kSimulationModeYOffset);
@@ -2427,10 +2440,10 @@ let Init = function ()
 		StartGroundObjects();
 	}
 
+	gScoreEventCounterGuide.set(scores.eStayedLow, 0);
 	gScoreEventCounterGuide.set(scores.eSingleRotate, 0);
 	gScoreEventCounterGuide.set(scores.eDoubleRotate, 0);
 	gScoreEventCounterGuide.set(scores.eTripleRotate, 0);
-	gScoreEventCounterGuide.set(scores.eStayedLow, 0);
 }
 
 /*---------------------------------------------------------------------------*/
