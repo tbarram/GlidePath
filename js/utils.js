@@ -24,7 +24,7 @@ class ShipHist
 let gShipHistArray = [
 
 // start no-rotate part - just thrust
-new ShipHist(616.88,489.83,0.00,false), 
+/*new ShipHist(616.88,489.83,0.00,false), 
 new ShipHist(616.88,489.48,0.00,false), 
 new ShipHist(616.88,489.18,0.00,false), 
 new ShipHist(616.88,488.89,0.00,false), 
@@ -703,7 +703,7 @@ new ShipHist(616.97,408.06,0.00,false),
 new ShipHist(616.97,406.11,0.00,false), 
 new ShipHist(616.97,403.97,0.00,false), 
 new ShipHist(616.97,402.10,0.00,false), 
-new ShipHist(616.97,400.16,0.00,false), 
+new ShipHist(616.97,400.16,0.00,false), */
 
 
 // start rotate 1
