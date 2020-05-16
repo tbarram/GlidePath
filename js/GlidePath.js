@@ -2271,7 +2271,7 @@ let GetUserInput = function (deltaMS)
 		let h = gShipHistArray[gShipHistArrayIndex];
 		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArray.length;
 
-		gShipObject.x = (h.x + kSimulationModeYOffset);
+		gShipObject.x = (h.x + (canvas.width/2 - kSimulationModeXOffset));
 		gShipObject.y = (h.y + gGroundMidpoint - kSimulationModeYOffset);
 		gThrusting = h.thrusting;
 	
