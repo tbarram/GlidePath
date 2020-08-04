@@ -45,6 +45,9 @@ function ASSERT(cond, str)
 let canvas = document.createElement("canvas");
 let ctx = canvas.getContext("2d");
 
+// enable to capture ship and ground history
+const gCapturingHistory = false;
+
 
 // using the window values causes glitches, so hardcode
 canvas.width = window.innerWidth; //1200;
@@ -68,7 +71,7 @@ let sGravitySettingsBest = {};
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
 const gDebugMode = urlParams.get('debug');
-let gGravityGameActive = urlParams.get('game');
+let gGravityGameActive = urlParams.get('gravity');
 const kShipGravityV = 140; // 100
 
 let gSimulationMode = !gGravityGameActive;
@@ -87,10 +90,7 @@ function handleMouseDown(e)
   	mouseIsDown = true;
 
   	if (gLogoImage.isPointInside(mouseX, mouseY, 20))
-  	{
-  		gGravityGameActive = !gGravityGameActive;
   		SwitchScreens();
-  	}
 }
 
 /*---------------------------------------------------------------------------*/
@@ -330,8 +330,6 @@ function InitElements()
 /*---------------------------------------------------------------------------*/
 function CreateCurvePath(pts) 
 {
-    ctx.beginPath();
-
     // since we add points to the trail array from the back, there can be
     // invalid entries at the front - here we find the first valid point
     let firstValid = 0;
@@ -346,6 +344,7 @@ function CreateCurvePath(pts)
 
     // draw line segments between the points, starting at the
     // first valid point
+    ctx.beginPath();
     ctx.moveTo(pts[firstValid].x, pts[firstValid].y);
     for (let i = firstValid + 1; i < pts.length; i++) 
     	ctx.lineTo(pts[i].x, pts[i].y);
@@ -464,6 +463,7 @@ let gShipObject = {};
 let gShipDistanceFromGround = 0;
 let gShipLow = false;
 let gShipAngle = 0;
+let gPreviousAngle = 0;
 let gShipAngleCos = 0;
 let gShipAngleSin = 0;
 let gThrusting = false;
@@ -473,7 +473,7 @@ let gShipBlinkEndMS_RotateMS = 0;
 let gBlinkColor;
 let gPauseThrustAfterShipReset = false;
 let gPauseRotateAfterShipReset = false;
-let gWasRotating = false;
+let gIsRotating = false;
 let gNumRotations = 0;
 let gNextBlinkMS = 0;
 let gBlink = false;
@@ -482,7 +482,7 @@ let gLastShootMS = 0;
 let gGameStartTimeMS = 0;
 let gNextElapsedTimeEventMS = 0;
 let gPercentage = 0;
-let gGameState = gGravityGameActive ? eInactive : eWaitingForStart;
+let gGameState = (gGravityGameActive ? eInactive : eWaitingForStart);
 let gScore = 0;
 let gLastScore = 0;
 let gBestScoreAllTime = 0;
@@ -580,6 +580,7 @@ class Object
 	/*---------------------------------------------------------------------------*/
 	draw() 
 	{
+		ctx.save();
 		switch (this.type)
 		{
 			case types.IMAGE:
@@ -602,12 +603,13 @@ class Object
 				CheckNextLine(this);
 				break;
 			case types.TEXT_BUBBLE:
-				DrawTextObject(this);
+				DrawTextBubble(this);
 				break;
 			case types.MINIMAP:
 				DrawCircle(GetMinimapPosition(this.parent), 1, this.minimapColor);
 				break;
 		}
+		ctx.restore();
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -663,9 +665,11 @@ class Object
 		// the acceleration will get accumulated in ApplyGravity by 
 		// the other objects
 		// acceleration is the ONLY changeable force
-		
 		if (this.hasGravity())
-			this.accX = this.accY = 0;
+		{
+			this.accX = 0;
+			this.accY = 0;
+		}
 	}
 
 	/*---------------------------------------------------------------------------*/
@@ -755,8 +759,8 @@ class Object
 		this.trail[kTrailSize - 1] = {x: this.x, y: this.y};
 
 		// style the trail lines
+		ctx.save();
 		ctx.strokeStyle = this.trailColor || "green";
-		const prevLineWidth = ctx.lineWidth;
 		ctx.lineWidth = 2;
 
 		// create the trail path - doesn't draw it, just creates the path
@@ -770,7 +774,7 @@ class Object
 		ctx.stroke();
 
 		// reset 
-		ctx.lineWidth = prevLineWidth;
+		ctx.restore();
 	}
 }
 
@@ -895,12 +899,10 @@ let DrawPolygon = function (verts, color)
 	ctx.shadowBlur = DoShipShadow() ? 20 : 0; 
 	ctx.shadowColor = "white";
 	ctx.moveTo(verts[0].x, verts[0].y);
-	for(let i = 1; i < verts.length; i++)
+	for (let i = 1; i < verts.length; i++)
 		ctx.lineTo(verts[i].x, verts[i].y);
 	ctx.closePath();
 	ctx.fill();
-
-	ctx.shadowBlur = 0; // reset
 }
 
 /*---------------------------------------------------------------------------*/
@@ -923,13 +925,18 @@ let RotateAndDraw = function (verts, pos, color)
 /*---------------------------------------------------------------------------*/
 let DoShipShadow = function()
 {
-	return (gShipDistanceFromGround < kDistanceGameScoreCutoff) || gThrusting;
+	return (gThrusting /*|| (gShipDistanceFromGround < kDistanceGameScoreCutoff)*/);
 }
 
 /*---------------------------------------------------------------------------*/
 let ColorForShip = function () 
 {
 	gShipObject.color = gShipLow ? MellowOrange() : kShipColor;
+
+	
+	if (gSimulationMode)
+		return gShipObject.colors;
+
 	let color = gShipObject.color;
 	const kBlinkSpeedMS = 100;
 
@@ -970,7 +977,7 @@ let ResetShip = function ()
 	gShipObject.accX = 0;
 	gShipObject.accY = kShipGravityV;
 
-	gShipObject.mass = GravityEnabled() ? sGravitySettings.shipG : 0;
+	gShipObject.mass = (GravityEnabled() ? sGravitySettings.shipG : 0);
 	
 	gShipBlinkEndMS_RotateMS = (gNowMS + 800);
 	gTotalRotateTimeMS = 0;
@@ -985,18 +992,19 @@ let ResetShip = function ()
 /*---------------------------------------------------------------------------*/
 let ResetSimulationStart = function()
 {
-	// go into simulation mode after 12 seconds of inactivity
-	gNextSimulationMS = GravityEnabled() ? 0 : (gNowMS + 12000);
+	// go into simulation mode after 15 seconds of inactivity
+	gNextSimulationMS = (GravityEnabled() ? 0 : (gNowMS + 15000));
 }
 
 /*---------------------------------------------------------------------------*/
 const kBaseWidth = 16;
 const kHeight = 8;
-const kHalfBaseWidth = (kBaseWidth / 2);
-const kHalfHeight = kHeight / 2;
 const kCenterIndent = 4;
-const kThrustWidth = ((kBaseWidth / 4) - 1);
 const kThrustHeight = 8;
+const kHalfBaseWidth = (kBaseWidth / 2);
+const kHalfHeight = (kHeight / 2);
+const kThrustWidth = ((kBaseWidth / 4) - 1);
+
 
 /*---------------------------------------------------------------------------*/
 let DrawShip = function (obj) 
@@ -1055,15 +1063,13 @@ let DrawCircle = function (obj, r, color)
 
 	ctx.arc(obj.x, obj.y, r, 0, M_2PI);
 	ctx.fill();
-
-	ctx.shadowBlur = 0; // reset
 }
 
 /*---------------------------------------------------------------------------*/
 let NewTextBubble = function(text, pos, color, first)
 {
-	const x = pos.x - 150;
-	const y = pos.y - 150;
+	const x = (pos.x - 150);
+	const y = (pos.y - 150);
 	const p = {x: pos.x + (gSwitch ? 80 : -80), y: pos.y - 80};
 	const v = {x: rnd(-30,30), y: rnd(-50,-20)};
 	const a = {x:0, y:0}; 
@@ -1486,10 +1492,10 @@ let ApplyGravity = function(o1, o2)
 	// bound it (these bounds have a huge affect on the systen)
 	gravity = Bound(gravity, kMinG, kMaxG);
 	
-	// get angle between the objects
+	// angle between the objects
 	const angle = Math.atan2(o2.x - o1.x, o2.y - o1.y);
 
-	// create the gravity acceleration vector
+	// gravity acceleration vector
 	const a = {	x: (gravity * Math.sin(angle)), 
 				y: (gravity * Math.cos(angle))};
 	
@@ -1507,18 +1513,18 @@ let ApplyGravity = function(o1, o2)
 /*---------------------------------------------------------------------------*/
 const kMinimapHeight = 40;
 const kMinimapOuterRatio = 4;
-//const kMiniMapTopLeftCorner = {mX: 130, mY: 80};
-//const kMiniMapTopLeftCorner = {mX: canvas.width - 230, mY: canvas.height - 140};
-const kMiniMapTopLeftCorner = {mX: 130, mY: canvas.height - 140};
+//const kMiniMapTopLeftCorner = {x: 130, y: 80};
+//const kMiniMapTopLeftCorner = {x: canvas.width - 230, y: canvas.height - 140};
+const kMiniMapTopLeftCorner = {x: 130, y: canvas.height - 140};
 
 /*---------------------------------------------------------------------------*/
 const kMinimapWidth = canvas.width * kMinimapHeight / canvas.height;
 const kMinimapOuterHeight = kMinimapOuterRatio * kMinimapHeight;
 const kMinimapOuterWidth = kMinimapOuterRatio * kMinimapWidth;
-const kMiniMapCenter = {mX: kMiniMapTopLeftCorner.mX + (kMinimapWidth/2),
-						mY: kMiniMapTopLeftCorner.mY + (kMinimapHeight/2)};
-const kMiniMapOuterTopLeftCorner = {mX: kMiniMapCenter.mX - (kMinimapOuterWidth/2),
-									mY: kMiniMapCenter.mY - (kMinimapOuterHeight/2)};
+const kMiniMapCenter = {x: kMiniMapTopLeftCorner.x + (kMinimapWidth/2),
+						y: kMiniMapTopLeftCorner.y + (kMinimapHeight/2)};
+const kMiniMapOuterTopLeftCorner = {x: kMiniMapCenter.x - (kMinimapOuterWidth/2),
+									y: kMiniMapCenter.y - (kMinimapOuterHeight/2)};
 
 /*---------------------------------------------------------------------------*/
 let DrawMiniMap = function () 
@@ -1530,12 +1536,12 @@ let DrawMiniMap = function ()
 
 	// inner rect
 	ctx.beginPath();
-	ctx.rect(kMiniMapTopLeftCorner.mX, kMiniMapTopLeftCorner.mY, kMinimapWidth, kMinimapHeight);
+	ctx.rect(kMiniMapTopLeftCorner.x, kMiniMapTopLeftCorner.y, kMinimapWidth, kMinimapHeight);
 	ctx.stroke();
 
 	// outer rect
 	ctx.beginPath();
-	ctx.rect(kMiniMapOuterTopLeftCorner.mX, kMiniMapOuterTopLeftCorner.mY, kMinimapOuterWidth, kMinimapOuterHeight);
+	ctx.rect(kMiniMapOuterTopLeftCorner.x, kMiniMapOuterTopLeftCorner.y, kMinimapOuterWidth, kMinimapOuterHeight);
 	ctx.stroke();
 }
 
@@ -1548,8 +1554,8 @@ let Interpolate = function(a1, a2, a, b1, b2)
 /*---------------------------------------------------------------------------*/
 let GetMinimapPosition = function(p)
 {
-	const x = Interpolate(0, canvas.width, p.x, kMiniMapTopLeftCorner.mX, kMiniMapTopLeftCorner.mX + kMinimapWidth);
-	const y = Interpolate(canvas.height, 0, p.y, kMiniMapTopLeftCorner.mY + kMinimapHeight, kMiniMapTopLeftCorner.mY);
+	const x = Interpolate(0, canvas.width, p.x, kMiniMapTopLeftCorner.x, kMiniMapTopLeftCorner.x + kMinimapWidth);
+	const y = Interpolate(canvas.height, 0, p.y, kMiniMapTopLeftCorner.y + kMinimapHeight, kMiniMapTopLeftCorner.y);
 	return {x:x, y:y};
 }
 
@@ -1627,6 +1633,7 @@ let DoGame = function()
 		{
 			DoWaitingForStartText();
 
+			// game starts when ship first thrusts
 			if (gThrusting && !gSimulationMode)
 				gGameState = eStarting;
 
@@ -1635,10 +1642,11 @@ let DoGame = function()
 
 		case eStarting:
 		{
+			gGameState = eStarted;
+
 			gScore = 0;
 			gPercentage = 0;
 			gScoreEventCounter.clear();
-			gGameState = eStarted;
 			gGameStartTimeMS = gNowMS;
 			gNextElapsedTimeEventMS = (gGameStartTimeMS + kElapsedTimeThresholdMS);
 			gTotalRotateTimeMS = 0;
@@ -1861,6 +1869,11 @@ let gShipHistory;
 /*---------------------------------------------------------------------------*/
 let DumpLineHistory = function()
 {
+	if (!gCapturingHistory)
+		return;
+
+	// this format is such that it can be copy/pasted from the console
+	// and used in the arrays in utils.js
 	console.log("----------------------------------- \n");
 	console.log("let gGroundArrayBottom = [ \n");
 	console.log(gBottomLineHistoryString);
@@ -1894,7 +1907,8 @@ let InitGround = function(obj, isBottom, increasing)
 	obj.increasing = increasing;
 	obj.hasTriggeredNext = false;
 
-	// each ground object is a new line segment
+	// each ground object is a line segment with a width & height
+
 	if (gSimulationMode)
 	{
 		let g = GetGroundCoords();
@@ -1908,10 +1922,13 @@ let InitGround = function(obj, isBottom, increasing)
 		obj.height = rnd(kGroundMinHeight, kGroundMaxHeight);
 	}
 
-	if (isBottom)
-		gBottomLineHistoryString += ("new GroundObj(" + obj.width + "," + obj.height + "), \n");
-	else
-		gTopLineHistoryString += ("new GroundObj(" + obj.width + "," + obj.height + "), \n");
+	if (gCapturingHistory)
+	{
+		if (isBottom)
+			gBottomLineHistoryString += ("new GroundObj(" + obj.width + "," + obj.height + "), \n");
+		else
+			gTopLineHistoryString += ("new GroundObj(" + obj.width + "," + obj.height + "), \n");
+	}
 	
 	// make sure the line segments stay within the range
 	const minY = isBottom ? gLowerLineMin : gUpperLineMin;
@@ -1966,8 +1983,7 @@ let gLowerLineMax = 0;
 const kSimulationModeYOffset = 400;
 const kSimulationModeXOffset = 616;
 
-
-// might need to be based on canvas.height
+// where does the ground midpoint start
 const kGroundMidpointHeight = 300; //500; 
 const kGroundMidpointOrig = (canvas.height - kGroundMidpointHeight);
 
@@ -1982,11 +1998,12 @@ const kGroundMidpointSpeed = 0; //0.1;
 
 // the min difference between the inner lines
 // note: this can't be too small if the lines are moving fast
-const kMinClosenessOrig = 50; //84; //64;
+// or they can overlap
+const kMinClosenessOrig = 120; //84; //50; //84; //64;
 const kMinClosenessMin = 30; // good min - anything smaller is too hard
 
 // the max difference between the outer lines
-const kMaxFarnessOrig = 300; //400;
+const kMaxFarnessOrig = 400; //300; //400;
 const kMaxFarnessMin = 200;
 
 let gGroundMidpoint = kGroundMidpointOrig;
@@ -2051,7 +2068,7 @@ let DrawGroundObjects = function(groundObjects)
 }
 
 /*---------------------------------------------------------------------------*/
-let DrawTextObject = function(obj)
+let DrawTextBubble = function(obj)
 {
 	ctx.fillStyle = obj.color;
 	ctx.font = "16px Helvetica";
@@ -2079,7 +2096,7 @@ let RotationScore = function (numRotations)
 /*---------------------------------------------------------------------------*/
 let ShipRotated = function ()
 {
-	gBlinkColor = gNumRotations <= 1 ? gShipObject.color : "red";
+	gBlinkColor = (gNumRotations <= 1 ? gShipObject.color : "red");
 	gShipBlinkEndMS_RotateMS = (gNowMS + (gNumRotations <= 1 ? 800 : 1600));
 	RotationScore(gNumRotations);
 }
@@ -2089,8 +2106,10 @@ let CheckRotation = function (isRotating)
 {
 	if (isRotating)
 	{
-		if (!gWasRotating)
+		if (!gIsRotating)
 		{
+			gIsRotating = true;
+
 			// the ship just started rotating - snapshot the start angle
 			gAngleStart = gShipAngle;
 		}
@@ -2113,11 +2132,9 @@ let CheckRotation = function (isRotating)
 	}
 	else
 	{
+		gIsRotating = false;
 		gNumRotations = 0;
 	}
-	
-	// then is now
-	gWasRotating = isRotating;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2129,7 +2146,6 @@ let ExitSimulationMode = function()
 		ResetShip();
 
 		// kill any text bubbles created during simulation mode
-		// (not needed since we no longer create text bubbbles in sim mode)
 		gTextBubbleList.forEach(obj => obj.setLifetime(0));
 		gTextBubbleList = [];
 	}
@@ -2140,22 +2156,43 @@ let ExitSimulationMode = function()
 /*---------------------------------------------------------------------------*/
 // keyboard input
 let gKeysDown = {};
+
+/*---------------------------------------------------------------------------*/
+function handleKeyDown(e)
+{
+	
+}
+
+/*---------------------------------------------------------------------------*/
 addEventListener("keydown", (e) => 
 	{ 
 		gKeysDown[e.keyCode] = true; 
 		e.preventDefault(); 	
+
+		// any key press exits sim mode
 		ExitSimulationMode();
 
 	}, false);
 
-addEventListener("keyup"  , (e) => { delete gKeysDown[e.keyCode]; e.preventDefault(); }, false);
+/*---------------------------------------------------------------------------*/
+addEventListener("keyup", (e) => 
+	{ 
+		delete gKeysDown[e.keyCode]; 
+		e.preventDefault(); 
+
+	}, false);
+
+/*---------------------------------------------------------------------------*/
+let KeyDown = function(key) 
+{ 
+	return (key in gKeysDown); 
+}
 
 const _Z_ = 90;
 const _X_ = 88;
 const _UpArrow_ = 38;
 const _LeftArrow_ = 37;
 const _RightArrow_ = 39;
-let KeyDown = function(key) { return key in gKeysDown; }
 
 /*---------------------------------------------------------------------------*/
 let gLastKeyTime = new Array;
@@ -2183,23 +2220,17 @@ let IsValidAndPastMS = function (timeMS)
 	return (timeMS !== 0 && (timeMS < gNowMS));
 }
 
-
-let previousAngle = 0;
-
 /*---------------------------------------------------------------------------*/
 let GetUserInput = function (deltaMS) 
 {
 	const delta = (deltaMS / 1000);
-	let someKeyDown = false;
 
 	// assume not
 	gThrusting = false;
 
-	// check thrusting keys
-	if (KeyDown(_Z_) || KeyDown(_UpArrow_))
+	// check thrusting keys (can't thrust while rotating)
+	if ((KeyDown(_Z_) || KeyDown(_UpArrow_)) && !gIsRotating)
 	{ 	
-		someKeyDown = true;
-
 		// after a ship reset, wait for the thrust key to be released before
 		// using it - this way you don't start out thrusting after a reset
 		if (!gPauseThrustAfterShipReset)
@@ -2227,15 +2258,13 @@ let GetUserInput = function (deltaMS)
 	// check shoot key
 	if (KeyDownThrottled(_X_, 500)) 
 	{
-		someKeyDown = true;
 		ShootBullets(gShipObject);
-		//DumpLineHistory();
+		DumpLineHistory();
 	}
 
 	// check arrow keys for rotation
 	let rotateDir = KeyDown(_LeftArrow_) ? -1 : KeyDown(_RightArrow_) ? 1 : 0;
 	let isRotating = (rotateDir !== 0);
-	someKeyDown |= isRotating;
 
 	if (isRotating)
 	{
@@ -2249,7 +2278,44 @@ let GetUserInput = function (deltaMS)
 		gPauseRotateAfterShipReset = false;
 	}
 
-	// this doesn't really belong here
+	CaptureShipHistory();
+
+	// move this into its own function
+	if (gSimulationMode)
+	{
+		let h = gShipHistArray[gShipHistArrayIndex];
+		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArray.length;
+
+		gShipObject.x = (h.x + (canvas.width/2 - kSimulationModeXOffset));
+		gShipObject.y = (h.y + gGroundMidpoint - kSimulationModeYOffset);
+		gThrusting = h.thrusting;
+	
+		gShipAngle = h.angle;
+		isRotating = (gShipAngle !== gPreviousAngle);
+		gPreviousAngle = gShipAngle;
+	}
+
+	if (isRotating)
+		CalcSinCosForShip();
+
+	CheckRotation(isRotating);
+}
+
+
+/*---------------------------------------------------------------------------*/
+let CaptureShipHistory = function()
+{
+	if (gCapturingHistory)
+	{
+		// for generating data for the gShipHistArray array
+		gShipHistory += ("new ShipHist(" + gShipObject.x.toFixed(2) + "," + gShipObject.y.toFixed(2) + "," + 
+							gShipAngle.toFixed(2) + "," + gThrusting + "), \n");
+	}
+}
+
+/*---------------------------------------------------------------------------*/
+let CheckEnterSimulationMode = function()
+{
 	if (IsValidAndPastMS(gNextSimulationMS))
 	{
 		gNextSimulationMS = 0;
@@ -2261,29 +2327,6 @@ let GetUserInput = function (deltaMS)
 		gShipAngle = 0;
 		CalcSinCosForShip();
 	}
-
-	// for generating data for the gShipHistArray array
-	//gShipHistory += ("new ShipHist(" + gShipObject.x.toFixed(2) + "," + gShipObject.y.toFixed(2) + "," + 
-	//					gShipAngle.toFixed(2) + "," + gThrusting + "), \n");
-
-	if (gSimulationMode)
-	{
-		let h = gShipHistArray[gShipHistArrayIndex];
-		gShipHistArrayIndex = (gShipHistArrayIndex + 1) % gShipHistArray.length;
-
-		gShipObject.x = (h.x + (canvas.width/2 - kSimulationModeXOffset));
-		gShipObject.y = (h.y + gGroundMidpoint - kSimulationModeYOffset);
-		gThrusting = h.thrusting;
-	
-		gShipAngle = h.angle;
-		isRotating = (gShipAngle !== previousAngle);
-		previousAngle = gShipAngle;
-	}
-
-	if (isRotating)
-		CalcSinCosForShip();
-
-	CheckRotation(isRotating);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -2307,7 +2350,7 @@ let ShipCollidedWithFallingObject = function()
 let Collided = function(o1, o2)
 {
 	return 	o1.x <= (o2.x + o2.width) &&
-			o2.x <= (o1.x + o1.height) &&
+			o2.x <= (o1.x + o1.width) &&
 			o1.y <= (o2.y + o2.height) &&
 			o2.y <= (o1.y + o1.height);
 }
@@ -2487,7 +2530,7 @@ let ClearCanvas = function ()
 /*---------------------------------------------------------------------------*/
 let CalcRotationTime = function(deltaMS)
 {
-	if (gWasRotating && gNumRotations > 0)
+	if (gIsRotating && gNumRotations > 0)
 		gTotalRotateTimeMS += deltaMS;
 }
 
@@ -2524,6 +2567,8 @@ let StopGravityObjects = function()
 /*---------------------------------------------------------------------------*/
 let SwitchScreens = function()
 {
+	gGravityGameActive = !gGravityGameActive;
+
 	if (GravityEnabled())
 	{
 		StopGroundObjects();
@@ -2629,6 +2674,7 @@ let DoOneFrame = function ()
 	DrawMiniMap();
 	DrawAndUpdateGround();
 	CalcRotationTime(deltaMS);
+	CheckEnterSimulationMode();
 	GetUserInput(deltaMS);
 	DoObjectPairInteractions();
 	CheckShipWithinLines();
