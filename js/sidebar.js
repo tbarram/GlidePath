@@ -363,7 +363,7 @@ export function createSidebar() {
   // ── Presets ────────────────────────────────────────────────────────
   const PRESETS = {
     default: {
-      masterVolume: 0.55, scale: 'aminor', baseOctave: 2, detune: 1.002,
+      masterVolume: 0.55, scale: 'aminor', baseOctave: 4, detune: 1.002,
       filterQ: 0.8, reverbMix: 0.38, flangeMix: 0.55,
       vibratoDepth: 0.010, proximityDistortion: 0.4, energyFilterScale: 1.0,
       stutterRate: 0, stutterDepth: 0, varispeedAmount: 0,
