@@ -30,7 +30,11 @@ function motionValue(obj, state, movement = 'distance') {
     case 'y': return clamp(obj.y ?? 0);
     case 'distance': return clamp(obj.dist ?? 0);
     case 'interaction': return clamp(obj.interaction ?? 0);
+    case 'attraction': return clamp(obj.attraction ?? 0);
+    case 'repulsion': return clamp(obj.repulsion ?? 0);
+    case 'orbit': return clamp(obj.orbit ?? 0);
     case 'near': return 1 - clamp(obj.dist ?? 0);
+    case 'nearest': return 1 - clamp(obj.nearest ?? obj.dist ?? 0);
     case 'speed': return clamp(obj.speed ?? 0);
     case 'acceleration': return clamp(obj.acceleration ?? 0);
     case 'angle': return clamp((obj.angle ?? 0) / 360);
@@ -143,6 +147,7 @@ class SourceVoice {
     this.output = null;
     this.gain = null;
     this.pan = null;
+    this.highpass = null;
     this.filter = null;
     this.source = null;
     this.sourceKind = '';
@@ -155,6 +160,10 @@ class SourceVoice {
     try { this.output?.disconnect(); } catch {}
     this.source = null;
     this.sourceKind = '';
+    this.highpass = null;
+    this.filter = null;
+    this.gain = null;
+    this.pan = null;
     this.output = null;
     this.signature = '';
   }
@@ -169,10 +178,15 @@ class SourceVoice {
     this.dispose();
 
     const ctx = this.engine.ctx;
+    this.highpass = ctx.createBiquadFilter();
+    this.highpass.type = 'highpass';
+    this.highpass.frequency.value = 55;
+    this.highpass.Q.value = 0.6;
+
     this.filter = ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
     this.filter.frequency.value = config.filterCutoff ?? 8000;
-    this.filter.Q.value = 0.8;
+    this.filter.Q.value = 0.75;
 
     this.gain = ctx.createGain();
     this.gain.gain.value = 0;
@@ -180,6 +194,7 @@ class SourceVoice {
     this.pan.pan.value = 0;
     this.output = this.pan;
 
+    this.highpass.connect(this.filter);
     this.filter.connect(this.gain);
     this.gain.connect(this.pan);
     this.pan.connect(this.engine.dryBus);
@@ -210,20 +225,22 @@ class SourceVoice {
       this.sourceKind = 'oscillator';
     }
 
-    this.source.connect(this.filter);
+    this.source.connect(this.highpass);
     this.source.start();
     this.signature = signature;
   }
 
-  update(obj, state, params, config, modulators, effects) {
+  update(obj, state, params, config, modulators, effects, mixInfo = {}) {
     this.ensure(config);
 
     const ctx = this.engine.ctx;
     const now = ctx.currentTime;
     const sourceType = config.sourceType ?? 'scale';
-    const baseGain = (config.gain ?? 0.45) * (params.masterVolume ?? 0.65);
+    const activeSources = Math.max(1, mixInfo.activeSources ?? 1);
+    const headroom = 0.88 / Math.sqrt(activeSources);
+    const baseGain = (config.gain ?? 0.45) * (params.masterVolume ?? 0.62) * headroom;
     const motion = behaviorValue(obj, state, config);
-    const envAmp = 1 + modulators.amp;
+    const envAmp = clamp(0.72 + modulators.amp, 0.08, 1.45);
 
     // Use separate smoothing for pitch (faster) vs gain (slower to avoid clicks)
     const gainSmooth = Math.max(0.02, modulators.time);
@@ -234,14 +251,14 @@ class SourceVoice {
       const scale = SCALES[config.scale ?? params.globalScale ?? 'aminor'] ?? SCALES.aminor;
       const degree = Math.floor(motion * scale.length) % scale.length;
       const octaveShift = motion < 0.25 ? -1 : motion > 0.75 ? 1 : 0;
-      const rootMidi = 45 + ((config.baseOctave ?? params.baseOctave ?? 2) - 2) * 12;
+      const rootMidi = 45 + ((config.baseOctave ?? params.baseOctave ?? 4) - 2) * 12;
       frequency = midiToHz(rootMidi + scale[degree] + octaveShift * 12);
     } else if (sourceType === 'note') {
       frequency = midiToHz((config.midiNote ?? 57) + (motion - 0.5) * (config.pitchDepth ?? 0));
     }
 
     // Apply pitch modulation
-    const pitchMod = 1 + modulators.pitch;
+    const pitchMod = clamp(1 + modulators.pitch, 0.5, 2);
     if (this.sourceKind === 'oscillator') {
       this.source.frequency.setTargetAtTime(frequency * pitchMod, now, pitchSmooth);
     } else if (sourceType === 'file' && this.source?.playbackRate) {
@@ -249,23 +266,32 @@ class SourceVoice {
     }
 
     // Gain — clamp to prevent distortion, use longer smoothing to avoid clicks
-    const sourceAmp = sourceType === 'noise' ? 0.55 : sourceType === 'file' ? 0.8 : 1;
-    const gain = config.enabled === false ? 0 : clamp(baseGain * sourceAmp * envAmp, 0, 1.4);
+    const sourceAmp = sourceType === 'noise' ? 0.38 : sourceType === 'file' ? 0.72 : 1;
+    const transientLift = sourceType === 'noise' ? clamp((obj?.acceleration ?? 0) * 0.32, 0, 0.32) : 0;
+    const gain = config.enabled === false ? 0 : clamp(baseGain * sourceAmp * (envAmp + transientLift), 0, 0.82);
     this.gain.gain.setTargetAtTime(gain, now, gainSmooth);
 
     // Spatial panning
+    const stereoSpread = activeSources > 1 ? (((this.index % activeSources) / Math.max(1, activeSources - 1)) - 0.5) * 0.45 : 0;
     const pan = config.spacePan === false
       ? (config.staticPan ?? 0)
-      : clamp(((obj?.x ?? 0.5) - 0.5) * 2 + modulators.pan, -1, 1);
+      : clamp(((obj?.x ?? 0.5) - 0.5) * 1.65 + stereoSpread + modulators.pan * 0.55, -1, 1);
     this.pan.pan.setTargetAtTime(pan, now, 0.03);
 
     // Filter with modulation
-    const cutoff = clamp((config.filterCutoff ?? 8000) * (1 + modulators.filter), 90, 18000);
-    this.filter.frequency.setTargetAtTime(cutoff, now, 0.025);
+    const registerHighpass = sourceType === 'noise'
+      ? 180 + this.index * 22
+      : Math.max(35, 48 * Math.pow(1.22, this.index % 6));
+    this.highpass.frequency.setTargetAtTime(registerHighpass, now, 0.05);
+
+    const antiMaskTilt = 1 + (this.index % 4) * 0.08 + (obj?.interaction ?? 0) * 0.18;
+    const cutoff = clamp((config.filterCutoff ?? 8000) * (1 + modulators.filter * 0.75) * antiMaskTilt, 140, 17500);
+    this.filter.frequency.setTargetAtTime(cutoff, now, 0.035);
 
     // Effect sends
     for (const name of ['echo', 'reverb', 'flanger']) {
-      this.send[name].gain.setTargetAtTime(effects[name] ?? 0, now, 0.035);
+      const sendLimit = name === 'reverb' ? 0.62 : name === 'echo' ? 0.48 : 0.42;
+      this.send[name].gain.setTargetAtTime(clamp(effects[name] ?? 0, 0, sendLimit), now, 0.045);
     }
   }
 }
@@ -298,18 +324,21 @@ class AudioDesignEngine {
     this.filter.type = 'lowpass';
     this.filter.frequency.value = 18000;
     this.compressor = this.ctx.createDynamicsCompressor();
-    this.compressor.threshold.value = -12;
-    this.compressor.ratio.value = 2;
+    this.compressor.threshold.value = -16;
+    this.compressor.knee.value = 18;
+    this.compressor.attack.value = 0.012;
+    this.compressor.release.value = 0.18;
+    this.compressor.ratio.value = 2.4;
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.8;
+    this.master.gain.value = 0.74;
 
     this.echoInput = this.ctx.createGain();
     this.echoDelay = this.ctx.createDelay(2);
     this.echoFeedback = this.ctx.createGain();
     this.echoReturn = this.ctx.createGain();
     this.echoDelay.delayTime.value = 0.22;
-    this.echoFeedback.gain.value = 0.28;
-    this.echoReturn.gain.value = 0.9;
+    this.echoFeedback.gain.value = 0.24;
+    this.echoReturn.gain.value = 0.55;
     this.echoInput.connect(this.echoDelay);
     this.echoDelay.connect(this.echoFeedback);
     this.echoFeedback.connect(this.echoDelay);
@@ -319,7 +348,7 @@ class AudioDesignEngine {
     this.reverb = this.ctx.createConvolver();
     this.reverb.buffer = createImpulse(this.ctx);
     this.reverbReturn = this.ctx.createGain();
-    this.reverbReturn.gain.value = 0.85;
+    this.reverbReturn.gain.value = 0.5;
     this.reverbInput.connect(this.reverb);
     this.reverb.connect(this.reverbReturn);
 
@@ -330,8 +359,8 @@ class AudioDesignEngine {
     this.flangerLfo = this.ctx.createOscillator();
     this.flangerDepth = this.ctx.createGain();
     this.flangerDelay.delayTime.value = 0.006;
-    this.flangerFeedback.gain.value = 0.2;
-    this.flangerReturn.gain.value = 0.9;
+    this.flangerFeedback.gain.value = 0.16;
+    this.flangerReturn.gain.value = 0.42;
     this.flangerLfo.frequency.value = 0.25;
     this.flangerDepth.gain.value = 0.002;
     this.flangerInput.connect(this.flangerDelay);
@@ -376,17 +405,22 @@ class AudioDesignEngine {
 
     const nodes = params.nodes ?? [];
     const objects = state.gravityObjects ?? [];
+    const objectById = new Map(objects.map((obj) => [obj.id, obj]));
     const now = this.ctx.currentTime;
     const sourceEffects = new Map();
     const sourceMods = new Map();
+    const activeSourceCount = nodes.filter((node, index) => {
+      const config = normalizeNode(node);
+      return config.role === 'source' && config.enabled !== false && (objectById.has(index) || objects[index]);
+    }).length;
     const mixEffects = {
       echo: 0,
       reverb: 0,
       flanger: 0,
       cutoff: 18000,
-      compression: 0,
+      compression: 0.08,
       echoTime: 0.22,
-      echoFeedback: 0.28,
+      echoFeedback: 0.24,
       flangerRate: 0.25,
       flangerDepth: 0.002,
     };
@@ -398,7 +432,7 @@ class AudioDesignEngine {
 
     for (let i = 0; i < MAX_AUDIO_NODES; i++) {
       const config = normalizeNode(nodes[i]);
-      const obj = objects[i];
+      const obj = objectById.get(i) ?? objects[i];
       if (!config.enabled || !obj) continue;
       const value = motionValue(obj, state, config.movement);
       const shaped = config.polarity === 'inverse' ? 1 - value : value;
@@ -408,10 +442,10 @@ class AudioDesignEngine {
         for (let targetIndex = 0; targetIndex < MAX_AUDIO_NODES; targetIndex++) {
           if (!targetMatches(config.target ?? 'sources', targetIndex)) continue;
           const mod = sourceMods.get(targetIndex);
-          if (config.destination === 'pitch') mod.pitch += (amount - 0.25) * 0.08;
-          else if (config.destination === 'filter') mod.filter += amount * 2;
-          else if (config.destination === 'pan') mod.pan += (amount - 0.25) * 2;
-          else mod.amp += amount;
+          if (config.destination === 'pitch') mod.pitch += (amount - 0.25) * 0.055;
+          else if (config.destination === 'filter') mod.filter += amount * 1.15;
+          else if (config.destination === 'pan') mod.pan += (amount - 0.25) * 1.35;
+          else mod.amp += amount * 0.75;
           mod.time = Math.max(0.01, shaped > 0.5 ? (config.attack ?? 0.04) : (config.release ?? 0.2));
         }
       }
@@ -424,7 +458,7 @@ class AudioDesignEngine {
           if (effectType === 'echo') {
             mixEffects.echo = Math.max(mixEffects.echo, wet);
             mixEffects.echoTime = clamp(config.time ?? 0.25, 0.03, 1.5);
-            mixEffects.echoFeedback = clamp((config.feedback ?? 0.35) + shaped * 0.35, 0, 0.82);
+            mixEffects.echoFeedback = clamp((config.feedback ?? 0.28) + shaped * 0.25, 0, 0.72);
           } else if (effectType === 'flanger') {
             mixEffects.flanger = Math.max(mixEffects.flanger, wet);
             mixEffects.flangerRate = clamp(0.1 + shaped * 5, 0.05, 8);
@@ -448,21 +482,23 @@ class AudioDesignEngine {
       }
     }
 
-    this.echoReturn.gain.setTargetAtTime(0.9, now, 0.05);
-    this.reverbReturn.gain.setTargetAtTime(0.85, now, 0.05);
-    this.flangerReturn.gain.setTargetAtTime(0.9, now, 0.05);
+    const densityDuck = clamp(1 - Math.max(0, activeSourceCount - 2) * 0.06, 0.62, 1);
+    this.echoReturn.gain.setTargetAtTime(0.52 * densityDuck, now, 0.05);
+    this.reverbReturn.gain.setTargetAtTime(0.48 * densityDuck, now, 0.05);
+    this.flangerReturn.gain.setTargetAtTime(0.4 * densityDuck, now, 0.05);
     this.echoDelay.delayTime.setTargetAtTime(mixEffects.echoTime, now, 0.05);
     this.echoFeedback.gain.setTargetAtTime(mixEffects.echoFeedback, now, 0.05);
     this.flangerLfo.frequency.setTargetAtTime(mixEffects.flangerRate, now, 0.05);
     this.flangerDepth.gain.setTargetAtTime(mixEffects.flangerDepth, now, 0.05);
-    this.filter.frequency.setTargetAtTime(clamp(mixEffects.cutoff, 100, 18000), now, 0.05);
-    this.compressor.threshold.setTargetAtTime(-12 - mixEffects.compression * 28, now, 0.05);
-    this.compressor.ratio.setTargetAtTime(2 + mixEffects.compression * 10, now, 0.05);
-    this.master.gain.setTargetAtTime(params.outputGain ?? 0.85, now, 0.03);
+    const energyBrightness = clamp((state.systemEnergy ?? 0) * 2400, 0, 2400);
+    this.filter.frequency.setTargetAtTime(clamp(mixEffects.cutoff + energyBrightness, 320, 17500), now, 0.05);
+    this.compressor.threshold.setTargetAtTime(-14 - mixEffects.compression * 20, now, 0.05);
+    this.compressor.ratio.setTargetAtTime(2.2 + mixEffects.compression * 6, now, 0.05);
+    this.master.gain.setTargetAtTime((params.outputGain ?? 0.78) * densityDuck, now, 0.04);
 
     for (let i = 0; i < MAX_AUDIO_NODES; i++) {
       const config = normalizeNode(nodes[i]);
-      const obj = objects[i];
+      const obj = objectById.get(i) ?? objects[i];
       const isSource = config.role === 'source' && config.enabled !== false && obj;
       if (!isSource) {
         this.voices.get(i)?.dispose();
@@ -482,7 +518,8 @@ class AudioDesignEngine {
           echo: Math.max(nodeEffects.echo, mixEffects.echo),
           reverb: Math.max(nodeEffects.reverb, mixEffects.reverb),
           flanger: Math.max(nodeEffects.flanger, mixEffects.flanger),
-        }
+        },
+        { activeSources: activeSourceCount }
       );
     }
   }

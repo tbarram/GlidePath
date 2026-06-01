@@ -9,7 +9,11 @@ const BEHAVIOR_OPTIONS = { Static: 'static', Spatial: 'spatial', Time: 'time', R
 const MOVEMENT_OPTIONS = {
   Distance: 'distance',
   Interaction: 'interaction',
+  Attraction: 'attraction',
+  Repulsion: 'repulsion',
+  Orbit: 'orbit',
   Nearness: 'near',
+  Nearest: 'nearest',
   Speed: 'speed',
   Acceleration: 'acceleration',
   'X Axis': 'x',
@@ -137,30 +141,75 @@ const SIDEBAR_CSS = `
   }
 
   .node-section {
-    border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.045);
-    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
     padding: 10px;
-    margin-bottom: 9px;
+    margin-bottom: 10px;
   }
 
   .node-section h3 {
-    margin: 0 0 9px;
-    color: rgba(255,255,255,0.82);
+    margin: 0;
+    color: rgba(255,255,255,0.88);
     font-size: 11px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .section-kicker {
+    color: rgba(255,255,255,0.34);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .section-help {
+    margin: 0 0 10px;
+    color: rgba(255,255,255,0.42);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .control-group {
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding-top: 8px;
+    margin-top: 8px;
+  }
+
+  .control-group:first-of-type {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+  }
+
+  .control-group-title {
+    margin: 0 0 5px;
+    color: rgba(96,165,250,0.82);
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
   .node-row {
     display: grid;
-    grid-template-columns: 104px minmax(0, 1fr) 42px;
+    grid-template-columns: 98px minmax(0, 1fr) 42px;
     align-items: center;
     gap: 8px;
-    min-height: 30px;
-    color: rgba(255,255,255,0.52);
+    min-height: 29px;
+    color: rgba(255,255,255,0.58);
     font-size: 10px;
   }
+
+  .node-row span { line-height: 1.15; }
 
   .node-row input[type="range"] { width: 100%; }
   .node-row input[type="checkbox"] { justify-self: start; }
@@ -192,10 +241,18 @@ const SIDEBAR_CSS = `
     flex-shrink: 0;
   }
 
+  .footer-label {
+    color: rgba(255,255,255,0.36);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
   .synth-footer-row { display: flex; gap: 6px; }
 
   .synth-btn {
     flex: 1;
+    min-width: 0;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 8px;
@@ -304,7 +361,7 @@ function createNode(role, overrides = {}) {
     behavior: 'spatial',
     motionParam: 'angle',
     scale: 'aminor',
-    baseOctave: 2,
+    baseOctave: 4,
     waveform: 'sine',
     midiNote: 57,
     pitchDepth: 7,
@@ -324,6 +381,13 @@ function createNode(role, overrides = {}) {
     time: 0.25,
     feedback: 0.35,
     fileName: '',
+    size: 30,
+    mass: 1,
+    gravityStrength: 1,
+    attraction: 0.42,
+    repulsion: 0.95,
+    orbit: 0.32,
+    influenceRadius: 260,
     ...overrides,
   };
 }
@@ -348,6 +412,18 @@ function row(label, control, value = '') {
   return `<label class="node-row"><span>${label}</span>${control}<output>${value}</output></label>`;
 }
 
+function section(title, kicker, help, body) {
+  return `<section class="node-section">
+    <div class="section-head"><h3>${title}</h3>${kicker ? `<span class="section-kicker">${kicker}</span>` : ''}</div>
+    ${help ? `<p class="section-help">${help}</p>` : ''}
+    ${body}
+  </section>`;
+}
+
+function group(title, body) {
+  return `<div class="control-group"><div class="control-group-title">${title}</div>${body}</div>`;
+}
+
 function select(scope, prop, value, options) {
   return `<select data-scope="${scope}" data-prop="${prop}">${optionsHtml(options, value)}</select>`;
 }
@@ -370,12 +446,12 @@ function text(scope, prop, value) {
 
 function renderSource(node) {
   const controls = [
-    row('Source', select('node', 'sourceType', node.sourceType, SOURCE_OPTIONS)),
-    row('Mode', select('node', 'behavior', node.behavior, BEHAVIOR_OPTIONS)),
-    row('Motion', select('node', 'motionParam', node.motionParam, MOVEMENT_OPTIONS)),
-    row('Gain', range('node', 'gain', node.gain, 0, 1, 0.01), Number(node.gain).toFixed(2)),
-    row('Filter', range('node', 'filterCutoff', node.filterCutoff, 120, 16000, 10), Math.round(node.filterCutoff)),
-    row('Space Pan', checkbox('node', 'spacePan', node.spacePan)),
+    row('Sound Type', select('node', 'sourceType', node.sourceType, SOURCE_OPTIONS)),
+    row('Motion Mode', select('node', 'behavior', node.behavior, BEHAVIOR_OPTIONS)),
+    row('Reads', select('node', 'motionParam', node.motionParam, MOVEMENT_OPTIONS)),
+    row('Level', range('node', 'gain', node.gain, 0, 1, 0.01), Number(node.gain).toFixed(2)),
+    row('Tone Cutoff', range('node', 'filterCutoff', node.filterCutoff, 120, 16000, 10), Math.round(node.filterCutoff)),
+    row('Auto Pan', checkbox('node', 'spacePan', node.spacePan)),
   ];
 
   if (node.sourceType === 'scale') {
@@ -400,10 +476,10 @@ function renderSource(node) {
 function renderEnvelope(node) {
   return [
     row('Target', select('node', 'target', node.target, TARGET_OPTIONS)),
-    row('Motion', select('node', 'movement', node.movement, MOVEMENT_OPTIONS)),
-    row('Affects', select('node', 'destination', node.destination, { Amplitude: 'amp', Pitch: 'pitch', Filter: 'filter', Pan: 'pan' })),
-    row('Polarity', select('node', 'polarity', node.polarity, { Positive: 'positive', Inverse: 'inverse' })),
-    row('Amount', range('node', 'amount', node.amount, 0, 1.5, 0.01), Number(node.amount).toFixed(2)),
+    row('Reads', select('node', 'movement', node.movement, MOVEMENT_OPTIONS)),
+    row('Changes', select('node', 'destination', node.destination, { Amplitude: 'amp', Pitch: 'pitch', Filter: 'filter', Pan: 'pan' })),
+    row('Direction', select('node', 'polarity', node.polarity, { Positive: 'positive', Inverse: 'inverse' })),
+    row('Depth', range('node', 'amount', node.amount, 0, 1.5, 0.01), Number(node.amount).toFixed(2)),
     row('Attack', range('node', 'attack', node.attack, 0.005, 1.5, 0.005), Number(node.attack).toFixed(2)),
     row('Release', range('node', 'release', node.release, 0.005, 2.5, 0.005), Number(node.release).toFixed(2)),
   ].join('');
@@ -413,9 +489,9 @@ function renderEffect(node) {
   const controls = [
     row('Effect', select('node', 'effectType', node.effectType, { Reverb: 'reverb', Echo: 'echo', Flanger: 'flanger', Filter: 'filter', Compressor: 'compressor' })),
     row('Target', select('node', 'target', node.target, TARGET_OPTIONS)),
-    row('Motion', select('node', 'movement', node.movement, MOVEMENT_OPTIONS)),
-    row('Base Mix', range('node', 'baseMix', node.baseMix, 0, 1, 0.01), Number(node.baseMix).toFixed(2)),
-    row('Motion Mix', range('node', 'amount', node.amount, 0, 1, 0.01), Number(node.amount).toFixed(2)),
+    row('Reads', select('node', 'movement', node.movement, MOVEMENT_OPTIONS)),
+    row('Base Wet', range('node', 'baseMix', node.baseMix, 0, 1, 0.01), Number(node.baseMix).toFixed(2)),
+    row('Motion Wet', range('node', 'amount', node.amount, 0, 1, 0.01), Number(node.amount).toFixed(2)),
   ];
 
   if (node.effectType === 'echo') {
@@ -437,14 +513,26 @@ function refreshFileControl(params) {
   if (label) label.textContent = node.fileName || 'No file loaded';
 }
 
+function physicsConfig(node) {
+  return {
+    size: node.size,
+    mass: node.mass,
+    gravityStrength: node.gravityStrength,
+    attraction: node.attraction,
+    repulsion: node.repulsion,
+    orbit: node.orbit,
+    influenceRadius: node.influenceRadius,
+  };
+}
+
 function syncVisualNode(params, index = Number(params.selectedNode) || 0) {
   const node = params.nodes[index];
   if (node?.role && node.role !== 'muted') {
-    window.GlidePathEnsureNode?.(index, node.name || `Node ${index + 1}`, node.role);
+    window.GlidePathEnsureNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
     return;
   }
   window.GlidePathRemoveNode?.(index);
-  window.GlidePathSyncNode?.(index, node?.name || `Node ${index + 1}`, node?.role || 'muted');
+  window.GlidePathSyncNode?.(index, node?.name || `Node ${index + 1}`, node?.role || 'muted', physicsConfig(node ?? {}));
 }
 
 function addNode(params) {
@@ -458,7 +546,7 @@ function addNode(params) {
     gain: 0.42,
   });
   params.selectedNode = index;
-  window.GlidePathAddNode?.(index, params.nodes[index].name, params.nodes[index].role);
+  window.GlidePathAddNode?.(index, params.nodes[index].name, params.nodes[index].role, physicsConfig(params.nodes[index]));
   return true;
 }
 
@@ -468,7 +556,66 @@ function clearNodes(params) {
   window.GlidePathClearNodes?.();
 }
 
+function randomizeNodePhysics(nodes, preset) {
+  return nodes.map((node) => {
+    if (!node || node.role === 'muted') return node;
+    const heavy = preset === 'heavy';
+    const scattered = preset === 'scattered';
+    const clustered = preset === 'clustered';
+    const chaotic = preset === 'chaotic';
+    return {
+      ...node,
+      size: Math.round(22 + Math.random() * 22),
+      mass: Number((0.55 + Math.random() * (heavy ? 3.8 : 1.8)).toFixed(2)),
+      gravityStrength: Number((0.45 + Math.random() * (chaotic ? 1.9 : 1.1)).toFixed(2)),
+      attraction: Number(((scattered ? 0.08 : 0.22) + Math.random() * (clustered ? 1.0 : 0.65)).toFixed(2)),
+      repulsion: Number((0.7 + Math.random() * (scattered ? 1.5 : 0.85)).toFixed(2)),
+      orbit: Number(((preset === 'calm' ? 0.12 : -0.25) + Math.random() * (chaotic ? 1.4 : 1.0)).toFixed(2)),
+      influenceRadius: Math.round(180 + Math.random() * (scattered ? 340 : 180)),
+    };
+  });
+}
+
 const BORDER_MODE_OPTIONS = { Repel: 'repel', Bounce: 'bounce', Wrap: 'wrap', None: 'none' };
+const MOVEMENT_PRESET_OPTIONS = {
+  Calm: 'calm',
+  Orbital: 'orbital',
+  Chaotic: 'chaotic',
+  Clustered: 'clustered',
+  Scattered: 'scattered',
+  Heavy: 'heavy',
+};
+const MOVEMENT_PRESET_PARAMS = {
+  calm: { gravity: 300, damping: 0.994, borderMargin: 80 },
+  orbital: { gravity: 520, damping: 0.992, borderMargin: 80 },
+  chaotic: { gravity: 760, damping: 0.986, borderMargin: 90 },
+  clustered: { gravity: 440, damping: 0.99, borderMargin: 80 },
+  scattered: { gravity: 380, damping: 0.993, borderMargin: 95 },
+  heavy: { gravity: 680, damping: 0.988, borderMargin: 90, centerMassEnabled: true, centerMass: 2.2, centerMassRadius: 130, centerMassOrbit: 0.22 },
+};
+const AUDIO_PRESET_OPTIONS = {
+  'Melodic Orbit': 'melodicOrbit',
+  'Percussion Web': 'percussionWeb',
+  'Harmonic Garden': 'harmonicGarden',
+  'Bass + Bells': 'bassAndBells',
+  'Sparse Motion': 'sparseMotion',
+  'Impact Texture': 'impactTexture',
+  'Experimental Flux': 'experimentalFlux',
+  Blank: 'blank',
+};
+const AUDIO_PRESET_PARAMS = {
+  melodicOrbit: { movementPreset: 'orbital', globalScale: 'aminorpenta', masterVolume: 0.62, outputGain: 0.78, centerMass: 1.25, centerMassRadius: 104, centerMassOrbit: 0.42 },
+  percussionWeb: { movementPreset: 'chaotic', globalScale: 'aminorpenta', masterVolume: 0.58, outputGain: 0.76, centerMass: 0.9, centerMassRadius: 88, centerMassOrbit: 0.58 },
+  harmonicGarden: { movementPreset: 'calm', globalScale: 'adorian', masterVolume: 0.56, outputGain: 0.8, centerMass: 0.7, centerMassRadius: 136, centerMassOrbit: 0.18 },
+  bassAndBells: { movementPreset: 'heavy', globalScale: 'amajor', masterVolume: 0.6, outputGain: 0.76, centerMass: 1.75, centerMassRadius: 128, centerMassOrbit: 0.28 },
+  sparseMotion: { movementPreset: 'orbital', globalScale: 'aminor', masterVolume: 0.58, outputGain: 0.78, centerMass: 1.0, centerMassRadius: 112, centerMassOrbit: 0.28 },
+  impactTexture: { movementPreset: 'chaotic', globalScale: 'dminor', masterVolume: 0.56, outputGain: 0.72, centerMass: 1.1, centerMassRadius: 96, centerMassOrbit: 0.54 },
+  experimentalFlux: { movementPreset: 'scattered', globalScale: 'dminor', masterVolume: 0.54, outputGain: 0.72, centerMass: 0.55, centerMassRadius: 150, centerMassOrbit: -0.35 },
+};
+
+function mutedNodes(count) {
+  return Array.from({ length: count }, () => createNode('muted'));
+}
 
 function renderPanel(host, params, presets) {
   const node = selectedNode(params);
@@ -493,28 +640,53 @@ function renderPanel(host, params, presets) {
   if (node.role === 'effect') nodeControls = renderEffect(node);
 
   host.innerHTML = `
-    <section class="node-section">
-      <h3>Global</h3>
-      ${row('Preset', select('params', 'preset', params.preset, { 'Blank': 'blank', 'Sparse Motion': 'sparseMotion', 'Impact Texture': 'impactTexture' }))}
-      ${row('Input Trim', range('params', 'masterVolume', params.masterVolume, 0, 1, 0.01), Number(params.masterVolume).toFixed(2))}
-      ${row('Output', range('params', 'outputGain', params.outputGain, 0, 1.2, 0.01), Number(params.outputGain).toFixed(2))}
-      ${row('Scale', select('params', 'globalScale', params.globalScale, { 'A Minor': 'aminor', 'A Minor Penta': 'aminorpenta', 'A Major': 'amajor', 'A Dorian': 'adorian', 'D Minor': 'dminor' }))}
-    </section>
-    <section class="node-section">
-      <h3>Physics</h3>
-      ${row('Gravity', range('physics', 'gravity', params.gravity ?? 500, 10, 2000, 10), Math.round(params.gravity ?? 500))}
-      ${row('Damping', range('physics', 'damping', params.damping ?? 0.998, 0.9, 1.0, 0.001), Number(params.damping ?? 0.998).toFixed(3))}
-      ${row('Border', select('physics', 'borderMode', params.borderMode ?? 'repel', BORDER_MODE_OPTIONS))}
-      ${row('Margin', range('physics', 'borderMargin', params.borderMargin ?? 60, 10, 200, 5), Math.round(params.borderMargin ?? 60))}
-    </section>
-    <section class="node-section">
-      <h3>Node ${selectedIndex + 1}${node.name ? ` — ${node.name}` : ''}</h3>
-      ${Object.keys(nodeOptions).length > 1 ? row('Edit', select('params', 'selectedNode', String(selectedIndex), nodeOptions)) : ''}
-      ${row('Name', text('node', 'name', node.name || ''))}
-      ${row('Type', select('node', 'role', node.role, ROLE_OPTIONS))}
-      ${row('Enabled', checkbox('node', 'enabled', node.enabled))}
-      ${nodeControls}
-    </section>
+    ${section('Sound Design', 'Preset', 'Choose a musical starting point, then tune levels and scale.', `
+      ${group('Musical Setup', `
+        ${row('Preset', select('params', 'preset', params.preset, AUDIO_PRESET_OPTIONS))}
+        ${row('Scale', select('params', 'globalScale', params.globalScale, { 'A Minor': 'aminor', 'A Minor Penta': 'aminorpenta', 'A Major': 'amajor', 'A Dorian': 'adorian', 'D Minor': 'dminor' }))}
+      `)}
+      ${group('Mix', `
+        ${row('Input Trim', range('params', 'masterVolume', params.masterVolume, 0, 1, 0.01), Number(params.masterVolume).toFixed(2))}
+        ${row('Output', range('params', 'outputGain', params.outputGain, 0, 1.2, 0.01), Number(params.outputGain).toFixed(2))}
+      `)}
+    `)}
+
+    ${section('Movement', 'Physics', 'Controls how nodes travel, orbit, separate, and react to the center mass.', `
+      ${group('World Motion', `
+        ${row('Motion Preset', select('physics', 'movementPreset', params.movementPreset ?? 'orbital', MOVEMENT_PRESET_OPTIONS))}
+        ${row('Gravity', range('physics', 'gravity', params.gravity ?? 500, 10, 2000, 10), Math.round(params.gravity ?? 500))}
+        ${row('Damping', range('physics', 'damping', params.damping ?? 0.992, 0.94, 1.0, 0.001), Number(params.damping ?? 0.992).toFixed(3))}
+      `)}
+      ${group('Boundaries', `
+        ${row('Edge Mode', select('physics', 'borderMode', params.borderMode ?? 'repel', BORDER_MODE_OPTIONS))}
+        ${row('Edge Margin', range('physics', 'borderMargin', params.borderMargin ?? 80, 10, 220, 5), Math.round(params.borderMargin ?? 80))}
+      `)}
+      ${group('Center Mass', `
+        ${row('Enabled', checkbox('physics', 'centerMassEnabled', params.centerMassEnabled ?? true))}
+        ${row('Strength', range('physics', 'centerMass', params.centerMass ?? 1.2, 0, 5, 0.05), Number(params.centerMass ?? 1.2).toFixed(2))}
+        ${row('Safe Radius', range('physics', 'centerMassRadius', params.centerMassRadius ?? 96, 48, 260, 4), Math.round(params.centerMassRadius ?? 96))}
+        ${row('Orbit Push', range('physics', 'centerMassOrbit', params.centerMassOrbit ?? 0.34, -1.5, 1.5, 0.01), Number(params.centerMassOrbit ?? 0.34).toFixed(2))}
+      `)}
+    `)}
+
+    ${section(`Node ${selectedIndex + 1}${node.name ? ` — ${node.name}` : ''}`, node.role || 'Muted', 'Select a node, decide what it does, then shape how it moves and modulates sound.', `
+      ${group('Identity', `
+        ${Object.keys(nodeOptions).length > 1 ? row('Selected', select('params', 'selectedNode', String(selectedIndex), nodeOptions)) : ''}
+        ${row('Name', text('node', 'name', node.name || ''))}
+        ${row('Role', select('node', 'role', node.role, ROLE_OPTIONS))}
+        ${row('Enabled', checkbox('node', 'enabled', node.enabled))}
+      `)}
+      ${nodeControls ? group(node.role === 'source' ? 'Sound' : node.role === 'envelope' ? 'Modulation' : 'Effect', nodeControls) : ''}
+      ${group('Physical Behavior', `
+        ${row('Size', range('node', 'size', node.size ?? 30, 14, 64, 1), Math.round(node.size ?? 30))}
+        ${row('Mass', range('node', 'mass', node.mass ?? 1, 0.25, 6, 0.05), Number(node.mass ?? 1).toFixed(2))}
+        ${row('Gravity', range('node', 'gravityStrength', node.gravityStrength ?? 1, 0.1, 3, 0.05), Number(node.gravityStrength ?? 1).toFixed(2))}
+        ${row('Attract', range('node', 'attraction', node.attraction ?? 0.42, 0, 2, 0.01), Number(node.attraction ?? 0.42).toFixed(2))}
+        ${row('Repel', range('node', 'repulsion', node.repulsion ?? 0.95, 0, 2.5, 0.01), Number(node.repulsion ?? 0.95).toFixed(2))}
+        ${row('Orbit', range('node', 'orbit', node.orbit ?? 0.32, -1.5, 1.5, 0.01), Number(node.orbit ?? 0.32).toFixed(2))}
+        ${row('Influence', range('node', 'influenceRadius', node.influenceRadius ?? 260, 80, 640, 5), Math.round(node.influenceRadius ?? 260))}
+      `)}
+    `)}
   `;
 
   refreshFileControl(params);
@@ -535,21 +707,43 @@ function updateFromControl(element, params, presets, render) {
     else if (prop === 'damping') { params.damping = value; window.GlidePathSetDamping?.(value); }
     else if (prop === 'borderMode') { params.borderMode = value; window.GlidePathSetBorderMode?.(value); }
     else if (prop === 'borderMargin') { params.borderMargin = value; window.GlidePathSetBorderMargin?.(value); }
+    else if (prop === 'centerMassEnabled') { params.centerMassEnabled = value; window.GlidePathSetCenterMassEnabled?.(value); }
+    else if (prop === 'centerMass') { params.centerMass = value; window.GlidePathSetCenterMass?.(value); }
+    else if (prop === 'centerMassRadius') { params.centerMassRadius = value; window.GlidePathSetCenterMassRadius?.(value); }
+    else if (prop === 'centerMassOrbit') { params.centerMassOrbit = value; window.GlidePathSetCenterMassOrbit?.(value); }
+    else if (prop === 'movementPreset') {
+      params.movementPreset = value;
+      Object.assign(params, MOVEMENT_PRESET_PARAMS[value] ?? {});
+      window.GlidePathApplyMovementPreset?.(value);
+    }
     const output = element.parentElement?.querySelector('output');
     if (output && (element.type === 'range' || element.type === 'number')) output.textContent = Number(value).toFixed(value < 10 ? 3 : 0);
+    if (prop === 'movementPreset') render();
     return;
   }
 
   const target = scope === 'node' ? selectedNode(params) : params;
   target[prop] = value;
 
+  if (scope === 'params' && prop === 'selectedNode') {
+    window.GlidePathSelectNode?.(value);
+  }
+
   if (scope === 'params' && prop === 'preset') {
+    const audioDefaults = AUDIO_PRESET_PARAMS[value] ?? {};
+    Object.assign(params, audioDefaults);
+    Object.assign(params, MOVEMENT_PRESET_PARAMS[params.movementPreset] ?? {}, audioDefaults);
     params.nodes = presets[value]();
     params.selectedNode = 0;
     window.GlidePathClearNodes?.();
+    window.GlidePathSetCenterMassEnabled?.(params.centerMassEnabled);
+    window.GlidePathSetCenterMass?.(params.centerMass);
+    window.GlidePathSetCenterMassRadius?.(params.centerMassRadius);
+    window.GlidePathSetCenterMassOrbit?.(params.centerMassOrbit);
     params.nodes.forEach((node, index) => {
-      if (node.role !== 'muted') window.GlidePathAddNode?.(index, node.name || `Node ${index + 1}`, node.role);
+      if (node.role !== 'muted') window.GlidePathAddNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
     });
+    window.GlidePathApplyMovementPreset?.(params.movementPreset ?? 'orbital');
   }
 
   const needsRender = ['preset', 'selectedNode', 'role', 'sourceType', 'effectType'].includes(prop);
@@ -581,17 +775,25 @@ export function createSidebar() {
         <span id="synth-file-name">No file loaded</span>
         <input type="file" id="synth-sample-input" accept="audio/*">
       </div>
+      <div class="footer-label">Nodes</div>
       <div class="synth-footer-row">
-        <button class="synth-btn" id="synth-add-btn">Add Node</button>
+        <button class="synth-btn" id="synth-prev-btn">Prev</button>
+        <button class="synth-btn" id="synth-next-btn">Next</button>
+        <button class="synth-btn" id="synth-add-btn">Add</button>
+        <button class="synth-btn" id="synth-random-btn">Random</button>
+      </div>
+      <div class="footer-label">View</div>
+      <div class="synth-footer-row">
         <button class="synth-btn" id="synth-freeze-btn">Freeze</button>
         <button class="synth-btn" id="synth-trails-btn">Trails</button>
         <button class="synth-btn" id="synth-clear-btn">Clear</button>
+        <button class="synth-btn" id="synth-resetview-btn">Reset</button>
       </div>
+      <div class="footer-label">Audio</div>
       <div class="synth-footer-row">
         <button class="synth-btn" id="synth-start-btn">Play</button>
         <button class="synth-btn" id="synth-record-btn">Record</button>
         <button class="synth-btn" id="synth-copy-btn">Copy</button>
-        <button class="synth-btn" id="synth-resetview-btn">Reset View</button>
       </div>
     </footer>
   `;
@@ -606,38 +808,103 @@ export function createSidebar() {
   applySidebarPosition(sidebar, openBtn, localStorage.getItem(SIDEBAR_POSITION_STORAGE_KEY));
 
   const params = {
-    preset: 'blank',
+    preset: 'melodicOrbit',
     selectedNode: 0,
     visualPaused: false,
-    masterVolume: 0.68,
-    outputGain: 0.85,
+    masterVolume: 0.62,
+    outputGain: 0.78,
     globalScale: 'aminor',
-    baseOctave: 2,
-    gravity: 500,
-    damping: 0.998,
+    baseOctave: 4,
+    gravity: 520,
+    damping: 0.992,
     borderMode: 'repel',
-    borderMargin: 60,
+    borderMargin: 80,
+    centerMassEnabled: true,
+    centerMass: 1.2,
+    centerMassRadius: 96,
+    centerMassOrbit: 0.34,
+    movementPreset: 'orbital',
     nodes: createDefaultNodes(),
   };
 
   const presets = {
     blank: createDefaultNodes,
+    melodicOrbit: () => [
+      createNode('source', { name: 'Lead Orbit', sourceType: 'scale', behavior: 'spatial-time', motionParam: 'angle', scale: 'aminorpenta', baseOctave: 4, waveform: 'triangle', gain: 0.28, filterCutoff: 7200, size: 28, mass: 0.9, attraction: 0.32, repulsion: 1.15, orbit: 0.72 }),
+      createNode('source', { name: 'Answer Bell', sourceType: 'scale', behavior: 'spatial', motionParam: 'nearest', scale: 'amajor', baseOctave: 5, waveform: 'sine', gain: 0.2, filterCutoff: 9800, size: 24, mass: 0.7, attraction: 0.22, repulsion: 1.45, orbit: -0.55 }),
+      createNode('source', { name: 'Warm Root', sourceType: 'note', behavior: 'spatial-time', motionParam: 'distance', waveform: 'sine', midiNote: 45, pitchDepth: 5, gain: 0.22, filterCutoff: 3200, size: 42, mass: 2.2, gravityStrength: 1.1, attraction: 0.58, repulsion: 0.78, orbit: 0.18, influenceRadius: 360 }),
+      createNode('envelope', { name: 'Proximity Swell', movement: 'near', target: 'sources', destination: 'amp', amount: 0.42, attack: 0.12, release: 0.85, size: 24, mass: 0.8, attraction: 0.28, repulsion: 1.3, orbit: 0.38 }),
+      createNode('envelope', { name: 'Orbit Brightness', movement: 'orbit', target: 'sources', destination: 'filter', amount: 0.5, attack: 0.08, release: 0.7, size: 24, mass: 0.75, attraction: 0.28, repulsion: 1.25, orbit: -0.4 }),
+      createNode('effect', { name: 'Tempo Echo', effectType: 'echo', movement: 'angularVelocity', target: 'mix', baseMix: 0.08, amount: 0.24, time: 0.28, feedback: 0.28, size: 30, mass: 1.0, attraction: 0.34, repulsion: 1.0, orbit: 0.5 }),
+      createNode('effect', { name: 'Small Room', effectType: 'reverb', movement: 'distance', target: 'mix', baseMix: 0.12, amount: 0.2, size: 34, mass: 1.1, attraction: 0.35, repulsion: 0.95, orbit: 0.32 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 7),
+    ],
+    percussionWeb: () => [
+      createNode('source', { name: 'Dust Hat', sourceType: 'noise', behavior: 'spatial', motionParam: 'speed', gain: 0.26, filterCutoff: 6200, size: 22, mass: 0.55, attraction: 0.12, repulsion: 1.9, orbit: 0.95 }),
+      createNode('source', { name: 'Body Thump', sourceType: 'note', behavior: 'spatial', motionParam: 'repulsion', waveform: 'sine', midiNote: 36, pitchDepth: 10, gain: 0.34, filterCutoff: 1200, size: 48, mass: 2.8, gravityStrength: 1.6, attraction: 0.75, repulsion: 0.82, orbit: -0.18, influenceRadius: 380 }),
+      createNode('source', { name: 'Wood Click', sourceType: 'note', behavior: 'spatial', motionParam: 'acceleration', waveform: 'triangle', midiNote: 72, pitchDepth: 7, gain: 0.18, filterCutoff: 7600, size: 24, mass: 0.65, attraction: 0.18, repulsion: 1.7, orbit: -0.8 }),
+      createNode('envelope', { name: 'Impact Gate', movement: 'acceleration', target: 'sources', destination: 'amp', amount: 0.82, attack: 0.008, release: 0.18, polarity: 'positive', size: 24, mass: 0.7, attraction: 0.14, repulsion: 1.8, orbit: 0.9 }),
+      createNode('envelope', { name: 'Distance Mute', movement: 'nearest', target: 'sources', destination: 'filter', amount: 0.42, attack: 0.02, release: 0.28, size: 24, mass: 0.8, attraction: 0.18, repulsion: 1.6, orbit: 0.55 }),
+      createNode('effect', { name: 'Slap Echo', effectType: 'echo', movement: 'interaction', target: 'mix', baseMix: 0.05, amount: 0.28, time: 0.14, feedback: 0.2, size: 28, mass: 0.9, attraction: 0.25, repulsion: 1.2, orbit: 0.45 }),
+      createNode('effect', { name: 'Transient Glue', effectType: 'compressor', movement: 'energy', target: 'mix', baseMix: 0.18, amount: 0.42, size: 36, mass: 1.5, attraction: 0.45, repulsion: 0.9, orbit: 0.15 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 7),
+    ],
+    harmonicGarden: () => [
+      createNode('source', { name: 'Pad Root', sourceType: 'note', behavior: 'spatial-time', motionParam: 'distance', waveform: 'sine', midiNote: 45, pitchDepth: 2, gain: 0.2, filterCutoff: 3600, size: 46, mass: 2.4, attraction: 0.62, repulsion: 0.7, orbit: 0.12, influenceRadius: 410 }),
+      createNode('source', { name: 'Pad Fifth', sourceType: 'note', behavior: 'spatial-time', motionParam: 'orbit', waveform: 'triangle', midiNote: 52, pitchDepth: 3, gain: 0.18, filterCutoff: 4200, size: 38, mass: 1.6, attraction: 0.44, repulsion: 0.92, orbit: 0.3 }),
+      createNode('source', { name: 'High Harmonic', sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', scale: 'adorian', baseOctave: 5, waveform: 'sine', gain: 0.15, filterCutoff: 11000, size: 24, mass: 0.75, attraction: 0.24, repulsion: 1.35, orbit: -0.45 }),
+      createNode('source', { name: 'Soft Air', sourceType: 'noise', behavior: 'spatial-time', motionParam: 'speed', gain: 0.08, filterCutoff: 5200, size: 22, mass: 0.55, attraction: 0.12, repulsion: 1.6, orbit: 0.62 }),
+      createNode('envelope', { name: 'Breathing Amp', movement: 'distance', target: 'sources', destination: 'amp', amount: 0.3, attack: 0.55, release: 1.6, size: 26, mass: 0.8, attraction: 0.3, repulsion: 1.2, orbit: 0.25 }),
+      createNode('effect', { name: 'Bloom Verb', effectType: 'reverb', movement: 'near', target: 'mix', baseMix: 0.22, amount: 0.3, size: 34, mass: 1.1, attraction: 0.32, repulsion: 1.0, orbit: 0.28 }),
+      createNode('effect', { name: 'Slow Flange', effectType: 'flanger', movement: 'orbit', target: 'sources', baseMix: 0.04, amount: 0.18, size: 30, mass: 1.0, attraction: 0.28, repulsion: 1.1, orbit: -0.22 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 7),
+    ],
+    bassAndBells: () => [
+      createNode('source', { name: 'Sub Anchor', sourceType: 'note', behavior: 'spatial-time', motionParam: 'distance', waveform: 'sine', midiNote: 33, pitchDepth: 4, gain: 0.3, filterCutoff: 900, size: 52, mass: 3.4, gravityStrength: 1.8, attraction: 0.82, repulsion: 0.7, orbit: 0.08, influenceRadius: 430 }),
+      createNode('source', { name: 'Bell A', sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', scale: 'aminorpenta', baseOctave: 5, waveform: 'sine', gain: 0.16, filterCutoff: 12000, size: 22, mass: 0.55, attraction: 0.18, repulsion: 1.65, orbit: 0.72 }),
+      createNode('source', { name: 'Bell B', sourceType: 'scale', behavior: 'spatial-time', motionParam: 'nearest', scale: 'amajor', baseOctave: 5, waveform: 'triangle', gain: 0.14, filterCutoff: 9800, size: 24, mass: 0.65, attraction: 0.2, repulsion: 1.55, orbit: -0.68 }),
+      createNode('envelope', { name: 'Bell Duck', movement: 'near', target: 'node-0', destination: 'filter', amount: 0.35, attack: 0.04, release: 0.5, polarity: 'inverse', size: 24, mass: 0.7, attraction: 0.2, repulsion: 1.4, orbit: 0.44 }),
+      createNode('envelope', { name: 'Spark Amp', movement: 'repulsion', target: 'sources', destination: 'amp', amount: 0.34, attack: 0.02, release: 0.45, size: 24, mass: 0.65, attraction: 0.18, repulsion: 1.6, orbit: -0.52 }),
+      createNode('effect', { name: 'Ping Echo', effectType: 'echo', movement: 'orbit', target: 'mix', baseMix: 0.1, amount: 0.24, time: 0.36, feedback: 0.32, size: 30, mass: 1.0, attraction: 0.3, repulsion: 1.1, orbit: 0.36 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 6),
+    ],
     sparseMotion: () => [
-      createNode('source', { name: 'Orbit Tone', sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', waveform: 'triangle', gain: 0.32 }),
-      createNode('source', { name: 'Low Drone', sourceType: 'note', behavior: 'time', waveform: 'sine', midiNote: 33, gain: 0.28 }),
-      createNode('envelope', { name: 'Near Filter', movement: 'near', target: 'sources', destination: 'filter', amount: 0.8, attack: 0.05, release: 0.7 }),
-      createNode('effect', { name: 'Space Verb', effectType: 'reverb', movement: 'distance', target: 'mix', baseMix: 0.18, amount: 0.45 }),
-      ...Array.from({ length: MAX_AUDIO_NODES - 4 }, () => createNode('muted')),
+      createNode('source', { name: 'Orbit Tone', sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', waveform: 'triangle', gain: 0.26, filterCutoff: 6500, size: 28, mass: 0.9, attraction: 0.36, repulsion: 1.05, orbit: 0.58 }),
+      createNode('source', { name: 'Low Drone', sourceType: 'note', behavior: 'spatial-time', motionParam: 'nearest', waveform: 'sine', midiNote: 33, gain: 0.22, filterCutoff: 2600, size: 42, mass: 2.1, gravityStrength: 1.15, attraction: 0.55, repulsion: 0.72, orbit: 0.18, influenceRadius: 340 }),
+      createNode('envelope', { name: 'Near Filter', movement: 'near', target: 'sources', destination: 'filter', amount: 0.55, attack: 0.05, release: 0.7, size: 24, mass: 0.75, attraction: 0.28, repulsion: 1.3, orbit: -0.25 }),
+      createNode('effect', { name: 'Space Verb', effectType: 'reverb', movement: 'orbit', target: 'mix', baseMix: 0.16, amount: 0.28, size: 34, mass: 1.2, attraction: 0.4, repulsion: 1.0, orbit: 0.5 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 4),
     ],
     impactTexture: () => [
-      createNode('source', { name: 'Motion Noise', sourceType: 'noise', behavior: 'spatial', motionParam: 'speed', filterCutoff: 1900, gain: 0.42 }),
-      createNode('source', { name: 'Impact Root', sourceType: 'note', behavior: 'spatial', motionParam: 'near', waveform: 'sawtooth', midiNote: 36, pitchDepth: 19, gain: 0.3 }),
-      createNode('envelope', { name: 'Acceleration Hit', movement: 'acceleration', target: 'sources', destination: 'amp', amount: 0.9, attack: 0.01, release: 0.16 }),
-      createNode('effect', { name: 'Spin Flange', effectType: 'flanger', movement: 'angularVelocity', target: 'sources', baseMix: 0.12, amount: 0.6 }),
-      createNode('effect', { name: 'Energy Glue', effectType: 'compressor', movement: 'energy', target: 'mix', baseMix: 0.2, amount: 0.7 }),
-      ...Array.from({ length: MAX_AUDIO_NODES - 5 }, () => createNode('muted')),
+      createNode('source', { name: 'Motion Noise', sourceType: 'noise', behavior: 'spatial', motionParam: 'speed', filterCutoff: 1900, gain: 0.32, size: 26, mass: 0.8, attraction: 0.22, repulsion: 1.5, orbit: 0.75 }),
+      createNode('source', { name: 'Impact Root', sourceType: 'note', behavior: 'spatial', motionParam: 'repulsion', waveform: 'sawtooth', midiNote: 36, pitchDepth: 19, gain: 0.25, filterCutoff: 1400, size: 46, mass: 2.5, gravityStrength: 1.6, attraction: 0.8, repulsion: 0.85, orbit: -0.15, influenceRadius: 380 }),
+      createNode('envelope', { name: 'Acceleration Hit', movement: 'acceleration', target: 'sources', destination: 'amp', amount: 0.75, attack: 0.01, release: 0.16, size: 24, mass: 0.7, attraction: 0.18, repulsion: 1.8, orbit: 0.9 }),
+      createNode('effect', { name: 'Spin Flange', effectType: 'flanger', movement: 'angularVelocity', target: 'sources', baseMix: 0.08, amount: 0.34, size: 32, mass: 1.1, attraction: 0.35, repulsion: 1.1, orbit: 1.0 }),
+      createNode('effect', { name: 'Energy Glue', effectType: 'compressor', movement: 'energy', target: 'mix', baseMix: 0.18, amount: 0.45, size: 38, mass: 1.7, attraction: 0.5, repulsion: 0.95, orbit: 0.2 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 5),
+    ],
+    experimentalFlux: () => [
+      createNode('source', { name: 'Flux Noise', sourceType: 'noise', behavior: 'random', motionParam: 'speed', gain: 0.22, filterCutoff: 3400, size: 26, mass: 0.75, attraction: 0.05, repulsion: 2.05, orbit: 1.1, influenceRadius: 420 }),
+      createNode('source', { name: 'Bent Carrier', sourceType: 'note', behavior: 'spatial-time', motionParam: 'angularVelocity', waveform: 'sawtooth', midiNote: 48, pitchDepth: 21, gain: 0.18, filterCutoff: 4200, size: 34, mass: 1.4, attraction: 0.34, repulsion: 1.3, orbit: -1.0 }),
+      createNode('source', { name: 'Glass Thread', sourceType: 'scale', behavior: 'spatial', motionParam: 'repulsion', scale: 'dminor', baseOctave: 5, waveform: 'sine', gain: 0.13, filterCutoff: 13000, size: 22, mass: 0.5, attraction: 0.15, repulsion: 1.9, orbit: 0.84 }),
+      createNode('envelope', { name: 'Chaos Pan', movement: 'x', target: 'sources', destination: 'pan', amount: 0.72, attack: 0.03, release: 0.35, size: 24, mass: 0.7, attraction: 0.16, repulsion: 1.7, orbit: -0.6 }),
+      createNode('envelope', { name: 'Acceleration Pitch', movement: 'acceleration', target: 'sources', destination: 'pitch', amount: 0.5, attack: 0.02, release: 0.28, size: 24, mass: 0.75, attraction: 0.2, repulsion: 1.5, orbit: 0.7 }),
+      createNode('effect', { name: 'Moving Filter', effectType: 'filter', movement: 'nearest', target: 'mix', baseMix: 0.0, amount: 0.75, size: 28, mass: 0.9, attraction: 0.24, repulsion: 1.3, orbit: 0.42 }),
+      createNode('effect', { name: 'Wide Flange', effectType: 'flanger', movement: 'orbit', target: 'mix', baseMix: 0.1, amount: 0.34, size: 30, mass: 1.0, attraction: 0.3, repulsion: 1.2, orbit: -0.4 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 7),
     ],
   };
+
+  window.GlidePathSetCenterMassEnabled?.(params.centerMassEnabled);
+  window.GlidePathSetCenterMass?.(params.centerMass);
+  window.GlidePathSetCenterMassRadius?.(params.centerMassRadius);
+  window.GlidePathSetCenterMassOrbit?.(params.centerMassOrbit);
+
+  params.nodes = presets[params.preset]();
+  params.nodes.forEach((node, index) => {
+    if (node.role !== 'muted') window.GlidePathAddNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
+  });
+  window.GlidePathApplyMovementPreset?.(params.movementPreset);
 
   const host = document.getElementById('synth-pane-host');
   const render = () => renderPanel(host, params, presets);
@@ -645,9 +912,42 @@ export function createSidebar() {
 
   host.addEventListener('input', (event) => updateFromControl(event.target, params, presets, render));
   host.addEventListener('change', (event) => updateFromControl(event.target, params, presets, render));
+  window.addEventListener('glidepath:node-selected', (event) => {
+    const nodeIndex = event.detail?.nodeIndex;
+    if (Number.isInteger(nodeIndex) && params.selectedNode !== nodeIndex) {
+      params.selectedNode = nodeIndex;
+      render();
+    }
+  });
+
+  document.getElementById('synth-prev-btn').addEventListener('click', () => {
+    const next = window.GlidePathSelectAdjacentNode?.(-1);
+    if (Number.isInteger(next)) {
+      params.selectedNode = next;
+      render();
+    }
+  });
+
+  document.getElementById('synth-next-btn').addEventListener('click', () => {
+    const next = window.GlidePathSelectAdjacentNode?.(1);
+    if (Number.isInteger(next)) {
+      params.selectedNode = next;
+      render();
+    }
+  });
 
   document.getElementById('synth-add-btn').addEventListener('click', () => {
     if (addNode(params)) render();
+  });
+
+  document.getElementById('synth-random-btn').addEventListener('click', () => {
+    const preset = params.movementPreset ?? 'orbital';
+    params.nodes = randomizeNodePhysics(params.nodes, preset);
+    params.nodes.forEach((node, index) => {
+      if (node.role !== 'muted') window.GlidePathSyncNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
+    });
+    window.GlidePathRandomizeNodes?.(preset);
+    render();
   });
 
   document.getElementById('synth-clear-btn').addEventListener('click', () => {
