@@ -4,8 +4,18 @@ const SCALES = {
   aminor: [0, 2, 3, 5, 7, 8, 10],
   aminorpenta: [0, 3, 5, 7, 10],
   amajor: [0, 2, 4, 5, 7, 9, 11],
+  amajorpenta: [0, 2, 4, 7, 9],
   adorian: [0, 2, 3, 5, 7, 9, 10],
-  dminor: [2, 5, 3, 7, 8, 10],
+  alydian: [0, 2, 4, 6, 7, 9, 11],
+  amixolydian: [0, 2, 4, 5, 7, 9, 10],
+  aphrygian: [0, 1, 3, 5, 7, 8, 10],
+  aharmonicminor: [0, 2, 3, 5, 7, 8, 11],
+  amelodicminor: [0, 2, 3, 5, 7, 9, 11],
+  ablues: [0, 3, 5, 6, 7, 10],
+  hirajoshi: [0, 2, 3, 7, 8],
+  iwato: [0, 1, 5, 6, 10],
+  wholetone: [0, 2, 4, 6, 8, 10],
+  dminor: [2, 3, 5, 7, 8, 10],
 };
 
 const DEFAULT_NODE = {
@@ -21,6 +31,19 @@ function clamp(value, min = 0, max = 1) {
 
 function midiToHz(midi) {
   return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function rhythmToBeats(value = '1/8') {
+  return ({ '1/1': 4, '1/2': 2, '1/4': 1, '1/8': 0.5, '1/16': 0.25 })[value] ?? 0.5;
+}
+
+function noteFromMotion(obj, state, config, octaveOffset = 0) {
+  const scale = SCALES[config.scale ?? state.globalScale ?? 'aminor'] ?? SCALES.aminor;
+  const motion = behaviorValue(obj, state, config);
+  const degree = Math.floor(clamp(motion) * scale.length) % scale.length;
+  const rootMidi = 45 + ((config.baseOctave ?? 4) - 2 + octaveOffset) * 12;
+  const distanceOctave = (obj?.dist ?? 0.5) > 0.72 ? 1 : (obj?.dist ?? 0.5) < 0.25 ? -1 : 0;
+  return rootMidi + scale[degree] + distanceOctave * 12;
 }
 
 function motionValue(obj, state, movement = 'distance') {
@@ -83,6 +106,17 @@ function createNoiseBuffer(ctx) {
     data[i] = Math.random() * 2 - 1;
   }
   return buffer;
+}
+
+function makeSaturationCurve(amount = 0.08) {
+  const drive = 1 + clamp(amount, 0, 1) * 22;
+  const samples = 512;
+  const curve = new Float32Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+  }
+  return curve;
 }
 
 function createImpulse(ctx, seconds = 2.4, decay = 2.8) {
@@ -240,7 +274,8 @@ class SourceVoice {
     const headroom = 0.88 / Math.sqrt(activeSources);
     const baseGain = (config.gain ?? 0.45) * (params.masterVolume ?? 0.62) * headroom;
     const motion = behaviorValue(obj, state, config);
-    const envAmp = clamp(0.72 + modulators.amp, 0.08, 1.45);
+    const ampFloor = config.ampFloor ?? (sourceType === 'noise' ? 0.24 : 0.72);
+    const envAmp = clamp(ampFloor + modulators.amp, 0.001, 1.55);
 
     // Use separate smoothing for pitch (faster) vs gain (slower to avoid clicks)
     const gainSmooth = Math.max(0.02, modulators.time);
@@ -307,6 +342,9 @@ class AudioDesignEngine {
     this.noiseBuffer = null;
     this.recording = false;
     this.recordedChunks = [];
+    this.lastTriggerStep = new Map();
+    this.lastTriggerValue = new Map();
+    this.triggerEvents = new Map();
   }
 
   async init() {
@@ -320,9 +358,15 @@ class AudioDesignEngine {
 
     this.dryBus = this.ctx.createGain();
     this.preFilter = this.ctx.createGain();
+    this.highpassFilter = this.ctx.createBiquadFilter();
+    this.highpassFilter.type = 'highpass';
+    this.highpassFilter.frequency.value = 28;
     this.filter = this.ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
     this.filter.frequency.value = 18000;
+    this.saturation = this.ctx.createWaveShaper();
+    this.saturation.curve = makeSaturationCurve(0.08);
+    this.saturation.oversample = '2x';
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -16;
     this.compressor.knee.value = 18;
@@ -375,8 +419,10 @@ class AudioDesignEngine {
     this.echoReturn.connect(this.preFilter);
     this.reverbReturn.connect(this.preFilter);
     this.flangerReturn.connect(this.preFilter);
-    this.preFilter.connect(this.filter);
-    this.filter.connect(this.compressor);
+    this.preFilter.connect(this.highpassFilter);
+    this.highpassFilter.connect(this.filter);
+    this.filter.connect(this.saturation);
+    this.saturation.connect(this.compressor);
     this.compressor.connect(this.master);
     this.master.connect(this.ctx.destination);
 
@@ -400,6 +446,146 @@ class AudioDesignEngine {
     }
   }
 
+  voiceGain(value = 0.5) {
+    const gain = this.ctx.createGain();
+    gain.gain.value = value;
+    gain.connect(this.dryBus);
+    return gain;
+  }
+
+  triggerKick(velocity, pan = 0) {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const panner = ctx.createStereoPanner();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(96, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + 0.12);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.75 * velocity, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    panner.pan.value = pan * 0.18;
+    osc.connect(gain); gain.connect(panner); panner.connect(this.dryBus);
+    osc.start(now); osc.stop(now + 0.36);
+  }
+
+  triggerHat(velocity, pan = 0) {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    const hp = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    const panner = ctx.createStereoPanner();
+    src.buffer = this.noiseBuffer;
+    hp.type = 'highpass'; hp.frequency.value = 5200; hp.Q.value = 0.7;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.28 * velocity, now + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.075);
+    panner.pan.value = pan;
+    src.connect(hp); hp.connect(gain); gain.connect(panner); panner.connect(this.dryBus);
+    src.start(now); src.stop(now + 0.09);
+  }
+
+  triggerSnare(velocity, pan = 0) {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const noise = ctx.createBufferSource();
+    const bp = ctx.createBiquadFilter();
+    const ng = ctx.createGain();
+    const body = ctx.createOscillator();
+    const bg = ctx.createGain();
+    const panner = ctx.createStereoPanner();
+    noise.buffer = this.noiseBuffer;
+    bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.9;
+    ng.gain.setValueAtTime(0.0001, now);
+    ng.gain.exponentialRampToValueAtTime(0.34 * velocity, now + 0.006);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    body.type = 'triangle'; body.frequency.value = 185;
+    bg.gain.setValueAtTime(0.0001, now);
+    bg.gain.exponentialRampToValueAtTime(0.18 * velocity, now + 0.006);
+    bg.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    panner.pan.value = pan * 0.45;
+    noise.connect(bp); bp.connect(ng); ng.connect(panner);
+    body.connect(bg); bg.connect(panner); panner.connect(this.dryBus);
+    noise.start(now); body.start(now); noise.stop(now + 0.2); body.stop(now + 0.14);
+  }
+
+  triggerPluck(midi, velocity, pan = 0, isBass = false) {
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const filt = ctx.createBiquadFilter();
+    const gain = ctx.createGain();
+    const panner = ctx.createStereoPanner();
+    osc.type = isBass ? 'sawtooth' : 'triangle';
+    osc.frequency.value = midiToHz(midi);
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(isBass ? 1200 : 9000, now);
+    filt.frequency.exponentialRampToValueAtTime(isBass ? 260 : 1800, now + (isBass ? 0.28 : 0.22));
+    filt.Q.value = isBass ? 0.9 : 1.4;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime((isBass ? 0.38 : 0.24) * velocity, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + (isBass ? 0.42 : 0.26));
+    panner.pan.value = isBass ? pan * 0.18 : pan;
+    osc.connect(filt); filt.connect(gain); gain.connect(panner); panner.connect(this.dryBus);
+    osc.start(now); osc.stop(now + (isBass ? 0.46 : 0.3));
+  }
+
+  envelopeTriggerPulse(index, config, shaped, obj, now) {
+    const trigger = config.trigger ?? 'none';
+    if (trigger === 'none') return 0;
+
+    const key = `env:${index}`;
+    const threshold = config.triggerThreshold ?? (trigger === 'impact' ? 0.62 : trigger === 'orbit' ? 0.42 : 0.72);
+    const cooldown = config.triggerCooldown ?? 0.09;
+    const decay = Math.max(0.025, config.triggerDecay ?? config.release ?? 0.18);
+    const previous = this.lastTriggerValue.get(key) ?? 0;
+    const event = this.triggerEvents.get(key);
+    const intensity = trigger === 'impact'
+      ? Math.max(shaped, obj?.acceleration ?? 0, obj?.speed ?? 0)
+      : trigger === 'orbit'
+        ? Math.max(shaped, obj?.orbit ?? 0, Math.abs(obj?.angularVelocity ?? 0))
+        : shaped;
+    const crossed = previous < threshold && intensity >= threshold;
+    if (crossed && (!event || now - event.time > cooldown)) {
+      this.triggerEvents.set(key, {
+        time: now,
+        velocity: clamp(0.45 + intensity * 0.75 + (obj?.interaction ?? 0) * 0.2, 0.2, 1.25),
+      });
+    }
+    this.lastTriggerValue.set(key, intensity);
+
+    const active = this.triggerEvents.get(key);
+    if (!active) return 0;
+    const age = now - active.time;
+    if (age > decay * 6) return 0;
+    return (config.triggerAmount ?? config.amount ?? 0.6) * active.velocity * Math.exp(-age / decay);
+  }
+
+  maybeTriggerInstrument(index, config, obj, state, params) {
+    const instrument = config.instrument ?? 'synth';
+    if (instrument === 'synth') return;
+    const bpm = clamp(params.bpm ?? 96, 45, 180);
+    const stepSeconds = (60 / bpm) * rhythmToBeats(config.rhythm);
+    const step = Math.floor(this.ctx.currentTime / stepSeconds);
+    const key = `${index}:${instrument}`;
+    if (this.lastTriggerStep.get(key) === step) return;
+    this.lastTriggerStep.set(key, step);
+
+    const motion = behaviorValue(obj, { ...state, globalScale: params.globalScale }, config);
+    const probability = clamp((config.probability ?? 0.65) * (0.55 + motion * 0.75 + (obj.interaction ?? 0) * 0.35), 0.02, 0.98);
+    if (Math.random() > probability) return;
+
+    const velocity = clamp(0.35 + motion * 0.35 + (obj.speed ?? 0) * 0.2 + (obj.acceleration ?? 0) * 0.2, 0.18, 1);
+    const pan = clamp(((obj.x ?? 0.5) - 0.5) * 1.8, -0.9, 0.9);
+    if (instrument === 'kick') this.triggerKick(velocity, pan);
+    else if (instrument === 'snare') this.triggerSnare(velocity, pan);
+    else if (instrument === 'hat') this.triggerHat(velocity, pan);
+    else if (instrument === 'bass') this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, -1), velocity, pan, true);
+    else this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, instrument === 'arp' ? 0 : 0), velocity, pan, false);
+  }
+
   sync(state, params) {
     if (!this.ctx || this.ctx.state !== 'running') return;
 
@@ -411,14 +597,16 @@ class AudioDesignEngine {
     const sourceMods = new Map();
     const activeSourceCount = nodes.filter((node, index) => {
       const config = normalizeNode(node);
-      return config.role === 'source' && config.enabled !== false && (objectById.has(index) || objects[index]);
+      return config.role === 'source' && (config.instrument ?? 'synth') === 'synth' && config.enabled !== false && (objectById.has(index) || objects[index]);
     }).length;
     const mixEffects = {
       echo: 0,
       reverb: 0,
       flanger: 0,
       cutoff: 18000,
+      highpass: 28,
       compression: 0.08,
+      saturation: 0.08,
       echoTime: 0.22,
       echoFeedback: 0.24,
       flangerRate: 0.25,
@@ -434,11 +622,15 @@ class AudioDesignEngine {
       const config = normalizeNode(nodes[i]);
       const obj = objectById.get(i) ?? objects[i];
       if (!config.enabled || !obj) continue;
+      if (config.role === 'source') this.maybeTriggerInstrument(i, config, obj, state, params);
       const value = motionValue(obj, state, config.movement);
       const shaped = config.polarity === 'inverse' ? 1 - value : value;
-      const amount = (config.amount ?? 0.5) * shaped;
+      let amount = (config.amount ?? 0.5) * shaped;
 
       if (config.role === 'envelope') {
+        const triggerPulse = this.envelopeTriggerPulse(i, config, shaped, obj, now);
+        if (config.triggerOnly) amount = 0;
+        amount += triggerPulse;
         for (let targetIndex = 0; targetIndex < MAX_AUDIO_NODES; targetIndex++) {
           if (!targetMatches(config.target ?? 'sources', targetIndex)) continue;
           const mod = sourceMods.get(targetIndex);
@@ -463,10 +655,14 @@ class AudioDesignEngine {
             mixEffects.flanger = Math.max(mixEffects.flanger, wet);
             mixEffects.flangerRate = clamp(0.1 + shaped * 5, 0.05, 8);
             mixEffects.flangerDepth = clamp(0.001 + shaped * 0.006, 0.0005, 0.012);
-          } else if (effectType === 'filter') {
+          } else if (effectType === 'filter' || effectType === 'lowpass') {
             mixEffects.cutoff = Math.min(mixEffects.cutoff, 180 + shaped * 9000);
+          } else if (effectType === 'highpass') {
+            mixEffects.highpass = Math.max(mixEffects.highpass, 28 + shaped * 1600);
           } else if (effectType === 'compressor') {
             mixEffects.compression = Math.max(mixEffects.compression, wet);
+          } else if (effectType === 'saturation') {
+            mixEffects.saturation = Math.max(mixEffects.saturation, wet);
           } else {
             mixEffects.reverb = Math.max(mixEffects.reverb, wet);
           }
@@ -491,7 +687,9 @@ class AudioDesignEngine {
     this.flangerLfo.frequency.setTargetAtTime(mixEffects.flangerRate, now, 0.05);
     this.flangerDepth.gain.setTargetAtTime(mixEffects.flangerDepth, now, 0.05);
     const energyBrightness = clamp((state.systemEnergy ?? 0) * 2400, 0, 2400);
+    this.highpassFilter.frequency.setTargetAtTime(clamp(mixEffects.highpass, 20, 2200), now, 0.05);
     this.filter.frequency.setTargetAtTime(clamp(mixEffects.cutoff + energyBrightness, 320, 17500), now, 0.05);
+    this.saturation.curve = makeSaturationCurve(clamp(mixEffects.saturation, 0, 1));
     this.compressor.threshold.setTargetAtTime(-14 - mixEffects.compression * 20, now, 0.05);
     this.compressor.ratio.setTargetAtTime(2.2 + mixEffects.compression * 6, now, 0.05);
     this.master.gain.setTargetAtTime((params.outputGain ?? 0.78) * densityDuck, now, 0.04);
@@ -499,7 +697,7 @@ class AudioDesignEngine {
     for (let i = 0; i < MAX_AUDIO_NODES; i++) {
       const config = normalizeNode(nodes[i]);
       const obj = objectById.get(i) ?? objects[i];
-      const isSource = config.role === 'source' && config.enabled !== false && obj;
+      const isSource = config.role === 'source' && (config.instrument ?? 'synth') === 'synth' && config.enabled !== false && obj;
       if (!isSource) {
         this.voices.get(i)?.dispose();
         this.voices.delete(i);

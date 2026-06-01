@@ -74,6 +74,9 @@ const MOVEMENT_PRESETS = {
   clustered: { g: 440, damping: 0.99, maxV: 360, ambientMotion: 0.18, centerBias: 0.035, separation: 0.82 },
   scattered: { g: 380, damping: 0.993, maxV: 360, ambientMotion: 0.2, centerBias: 0.008, separation: 1.55 },
   heavy: { g: 680, damping: 0.988, maxV: 320, ambientMotion: 0.1, centerBias: 0.03, separation: 1.05, centerMassEnabled: true, centerMass: 2.2, centerMassRadius: 130, centerMassOrbit: 0.22 },
+  minimal: { g: 180, damping: 0.997, maxV: 140, ambientMotion: 0.055, centerBias: 0.012, separation: 1.2, centerMassEnabled: true, centerMass: 0.35, centerMassRadius: 180, centerMassOrbit: 0.08 },
+  aggressive: { g: 1180, damping: 0.978, maxV: 860, ambientMotion: 0.48, centerBias: 0.008, separation: 1.42, centerMassEnabled: true, centerMass: 1.7, centerMassRadius: 82, centerMassOrbit: 0.95 },
+  swarm: { g: 900, damping: 0.982, maxV: 740, ambientMotion: 0.38, centerBias: 0.006, separation: 1.6, centerMassEnabled: true, centerMass: 0.9, centerMassRadius: 110, centerMassOrbit: -0.75 },
 };
 
 // Zoom / pan state
