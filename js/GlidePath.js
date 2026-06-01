@@ -2591,6 +2591,8 @@ let SwitchScreens = function()
 	ShowHideHtmlElements(GravityEnabled());
 }
 
+// Expose switch function so the external synth sidebar can call it
+window.GlidePathSwitchScreens = SwitchScreens;
 
 /*---------------------------------------------------------------------------*/
 let StartGroundObjects = function()
@@ -2683,6 +2685,58 @@ let DoOneFrame = function ()
 	DoGame();
 	DrawText();
 	ShowScoreStats();
+
+	// Expose reactive state for the audio synthesis engine
+	const _cx = canvas.width  / 2;
+	const _cy = canvas.height / 2;
+	const _maxDist = Math.sqrt(_cx * _cx + _cy * _cy);
+	const _activeObjs = gGravityObjects.filter(o => o.alive);
+
+	// Per-object: position, velocity, polar coords from ship origin
+	const _gravObjs = _activeObjs.map(o => {
+		const dx = o.x - _cx;
+		const dy = o.y - _cy;
+		const dist = Math.sqrt(dx * dx + dy * dy);
+		const vx = o.velX || 0;
+		const vy = o.velY || 0;
+		// Angular velocity (rad/s, normalised): cross(v, r̂) / |r|
+		// Positive = counter-clockwise, negative = clockwise
+		// Maps directly to the curvature / tightness of the drag trail
+		const angularVelocity = dist > 1 ? (vx * dy - vy * dx) / (dist * dist * 60) : 0;
+		return {
+			x:               o.x / canvas.width,
+			y:               o.y / canvas.height,
+			dist:            dist / _maxDist,
+			angle:           ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360,
+			speed:           Math.sqrt(vx * vx + vy * vy) / 400,
+			angularVelocity: Math.max(-1, Math.min(1, angularVelocity)),
+			vx:              vx / 400,
+			vy:              vy / 400,
+		};
+	});
+
+	// System-level energy: mean speed of all objects
+	const _sysEnergy = _gravObjs.length
+		? _gravObjs.reduce((s, o) => s + o.speed, 0) / _gravObjs.length
+		: 0;
+
+	window.GlidePath = {
+		// Game-mode fields (kept for future use)
+		shipY:        1 - (gShipObject.y / canvas.height),
+		velX:         gShipObject.velX || 0,
+		velY:         gShipObject.velY || 0,
+		proximity:    (gShipDistanceFromGround < kDistanceGameScoreCutoff)
+			? 1 - Math.min(1, gShipDistanceFromGround / kDistanceGameScoreCutoff)
+			: 0,
+		isThrusting:  !!gThrusting,
+		isRotating:   !!gIsRotating,
+		numRotations: gNumRotations || 0,
+		// Mode + gravity-mode fields
+		gravityMode:     !!gGravityGameActive,
+		gravityObjects:  _gravObjs,
+		systemEnergy:    _sysEnergy,
+		objectCount:     _gravObjs.length,
+	};
 
 	gSwitch = !gSwitch;
 };
