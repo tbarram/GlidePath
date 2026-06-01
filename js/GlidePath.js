@@ -1983,8 +1983,9 @@ let gLowerLineMax = 0;
 const kSimulationModeYOffset = 400;
 const kSimulationModeXOffset = 616;
 
+// might need to be based on canvas.height
 // where does the ground midpoint start
-const kGroundMidpointHeight = 300; //500; 
+const kGroundMidpointHeight = 300; //500;
 const kGroundMidpointOrig = (canvas.height - kGroundMidpointHeight);
 
 // how far away from center we go before turning around
@@ -2146,6 +2147,7 @@ let ExitSimulationMode = function()
 		ResetShip();
 
 		// kill any text bubbles created during simulation mode
+		// (not needed since we no longer create text bubbbles in sim mode)
 		gTextBubbleList.forEach(obj => obj.setLifetime(0));
 		gTextBubbleList = [];
 	}
