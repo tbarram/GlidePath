@@ -597,24 +597,132 @@ function clearNodes(params) {
   window.GlidePathClearNodes?.();
 }
 
+const randFloat = (min, max) => min + Math.random() * (max - min);
+const randInt = (min, max) => Math.round(randFloat(min, max));
+const choose = (items) => items[Math.floor(Math.random() * items.length)];
+
 function randomizeNodePhysics(nodes, preset) {
   return nodes.map((node) => {
     if (!node || node.role === 'muted') return node;
     const heavy = preset === 'heavy';
     const scattered = preset === 'scattered';
     const clustered = preset === 'clustered';
-    const chaotic = preset === 'chaotic';
+    const chaotic = preset === 'chaotic' || preset === 'aggressive' || preset === 'swarm';
+    const minimal = preset === 'minimal' || preset === 'calm';
     return {
       ...node,
-      size: Math.round(22 + Math.random() * 22),
-      mass: Number((0.55 + Math.random() * (heavy ? 3.8 : 1.8)).toFixed(2)),
-      gravityStrength: Number((0.45 + Math.random() * (chaotic ? 1.9 : 1.1)).toFixed(2)),
-      attraction: Number(((scattered ? 0.08 : 0.22) + Math.random() * (clustered ? 1.0 : 0.65)).toFixed(2)),
-      repulsion: Number((0.7 + Math.random() * (scattered ? 1.5 : 0.85)).toFixed(2)),
-      orbit: Number(((preset === 'calm' ? 0.12 : -0.25) + Math.random() * (chaotic ? 1.4 : 1.0)).toFixed(2)),
-      influenceRadius: Math.round(180 + Math.random() * (scattered ? 340 : 180)),
+      size: randInt(20, heavy ? 58 : 44),
+      mass: Number(randFloat(0.5, heavy ? 4.2 : minimal ? 2.4 : 2.2).toFixed(2)),
+      gravityStrength: Number(randFloat(0.35, chaotic ? 2.5 : 1.35).toFixed(2)),
+      attraction: Number(randFloat(scattered || chaotic ? 0.06 : 0.2, clustered ? 1.25 : 0.9).toFixed(2)),
+      repulsion: Number(randFloat(0.65, scattered || chaotic ? 2.25 : 1.5).toFixed(2)),
+      orbit: Number(randFloat(minimal ? -0.16 : -0.75, chaotic ? 1.35 : 0.85).toFixed(2)),
+      influenceRadius: randInt(160, scattered || chaotic ? 560 : 390),
     };
   });
+}
+
+function randomSourceNode(index, mood) {
+  const isAmbient = mood === 'ambient' || mood === 'minimal';
+  const isPerc = mood === 'groove' || (!isAmbient && Math.random() < 0.35);
+  const instrument = isPerc ? choose(['kick', 'snare', 'hat', 'pluck', 'bass']) : choose(['synth', 'synth', 'pluck', 'arp']);
+  const sourceType = instrument === 'hat' ? 'noise' : instrument === 'kick' || instrument === 'bass' ? 'note' : choose(['scale', 'note']);
+  const midiBase = instrument === 'kick' ? 36 : instrument === 'bass' ? choose([33, 36, 38, 40]) : choose([45, 48, 52, 57, 60, 64, 69]);
+  return createNode('source', {
+    name: `${isAmbient ? 'Drift' : isPerc ? 'Pulse' : 'Tone'} ${index + 1}`,
+    instrument,
+    rhythm: choose(isAmbient ? ['1/2', '1/1', '1/4'] : ['1/16', '1/8', '1/4', '1/2']),
+    probability: Number(randFloat(isAmbient ? 0.28 : 0.45, isAmbient ? 0.72 : 0.94).toFixed(2)),
+    timingOffsetSource: choose(['none', 'none', 'orbit', 'interaction', 'pushPull', 'distance']),
+    timingOffsetAmount: Number(randFloat(0, isAmbient ? 0.22 : 0.34).toFixed(2)),
+    sourceType,
+    behavior: choose(['spatial', 'spatial-time', 'spatial-time', isAmbient ? 'time' : 'spatial']),
+    motionParam: choose(['angle', 'distance', 'nearest', 'orbit', 'speed', 'interaction', 'y']),
+    scale: choose(['aminorpenta', 'amajorpenta', 'alydian', 'adorian', 'hirajoshi', 'ablues']),
+    baseOctave: isAmbient ? choose([3, 4, 4, 5]) : choose([3, 4, 5]),
+    waveform: choose(isAmbient ? ['sine', 'triangle', 'triangle'] : ['sine', 'triangle', 'sawtooth']),
+    midiNote: midiBase,
+    pitchDepth: isAmbient ? randInt(0, 3) : randInt(0, 12),
+    gain: Number(randFloat(sourceType === 'noise' ? 0.04 : 0.1, isAmbient ? 0.24 : 0.38).toFixed(2)),
+    ampFloor: Number(randFloat(sourceType === 'noise' ? 0.01 : 0.65, sourceType === 'noise' ? 0.42 : 0.9).toFixed(2)),
+    filterCutoff: randInt(sourceType === 'noise' ? 3600 : 900, isAmbient ? 9000 : 14000),
+  });
+}
+
+function randomEnvelopeNode(index, sourceCount, mood) {
+  const destination = choose(['amp', 'filter', 'filter', 'pan', mood === 'chaos' ? 'pitch' : 'amp']);
+  const triggered = mood !== 'ambient' && Math.random() < 0.45;
+  return createNode('envelope', {
+    name: `${triggered ? 'Trigger' : 'Motion'} ${destination.toUpperCase()}`,
+    target: Math.random() < 0.72 ? 'sources' : `node-${randInt(0, Math.max(0, sourceCount - 1))}`,
+    movement: choose(['near', 'nearest', 'interaction', 'orbit', 'speed', 'acceleration', 'distance', 'y']),
+    destination,
+    polarity: Math.random() < 0.18 ? 'inverse' : 'positive',
+    amount: Number(randFloat(destination === 'pitch' ? 0.12 : 0.18, destination === 'pitch' ? 0.55 : 0.9).toFixed(2)),
+    attack: Number(randFloat(mood === 'ambient' ? 0.25 : 0.005, mood === 'ambient' ? 1.2 : 0.18).toFixed(3)),
+    release: Number(randFloat(mood === 'ambient' ? 0.8 : 0.08, mood === 'ambient' ? 2.8 : 0.75).toFixed(2)),
+    trigger: triggered ? choose(['proximity', 'orbit', 'impact']) : 'none',
+    triggerThreshold: Number(randFloat(0.35, 0.78).toFixed(2)),
+    triggerAmount: Number(randFloat(0.35, 1.15).toFixed(2)),
+    triggerDecay: Number(randFloat(0.04, 0.28).toFixed(2)),
+  });
+}
+
+function randomEffectNode(mood) {
+  const effectType = choose(mood === 'ambient'
+    ? ['reverb', 'reverb', 'echo', 'lowpass', 'flanger']
+    : ['reverb', 'echo', 'flanger', 'lowpass', 'highpass', 'compressor', 'saturation']);
+  return createNode('effect', {
+    name: `Random ${effectType}`,
+    effectType,
+    target: Math.random() < 0.82 ? 'mix' : 'sources',
+    movement: choose(['distance', 'near', 'interaction', 'orbit', 'energy', 'speed', 'y', 'angularVelocity']),
+    baseMix: Number(randFloat(effectType === 'reverb' ? 0.1 : 0.02, effectType === 'reverb' ? 0.34 : 0.16).toFixed(2)),
+    amount: Number(randFloat(0.12, effectType === 'compressor' || effectType === 'saturation' ? 0.38 : 0.5).toFixed(2)),
+    time: Number(randFloat(0.12, mood === 'ambient' ? 0.62 : 0.36).toFixed(2)),
+    feedback: Number(randFloat(0.16, mood === 'ambient' ? 0.38 : 0.52).toFixed(2)),
+  });
+}
+
+function createRandomPatch(params) {
+  const mood = choose(['ambient', 'groove', 'minimal', 'chaos']);
+  const movementPreset = mood === 'ambient' ? choose(['calm', 'minimal', 'orbital'])
+    : mood === 'groove' ? choose(['orbital', 'clustered', 'aggressive'])
+      : mood === 'minimal' ? 'minimal'
+        : choose(['chaotic', 'swarm', 'scattered']);
+  const sourceCount = mood === 'minimal' ? randInt(2, 3) : mood === 'ambient' ? randInt(4, 6) : randInt(3, 5);
+  const envelopeCount = mood === 'minimal' ? randInt(1, 2) : randInt(2, 4);
+  const effectCount = mood === 'minimal' ? randInt(1, 2) : randInt(2, 3);
+  const nodes = [];
+  for (let i = 0; i < sourceCount; i++) nodes.push(randomSourceNode(i, mood));
+  for (let i = 0; i < envelopeCount; i++) nodes.push(randomEnvelopeNode(sourceCount + i, sourceCount, mood));
+  for (let i = 0; i < effectCount; i++) nodes.push(randomEffectNode(mood));
+  while (nodes.length < MAX_AUDIO_NODES) nodes.push(createNode('muted'));
+
+  Object.assign(params, MOVEMENT_PRESET_PARAMS[movementPreset] ?? {}, {
+    movementPreset,
+    globalScale: choose(['aminorpenta', 'amajorpenta', 'adorian', 'alydian', 'hirajoshi', 'ablues', 'aharmonicminor']),
+    bpm: mood === 'ambient' || mood === 'minimal' ? randInt(56, 88) : randInt(92, 138),
+    masterVolume: Number(randFloat(0.48, 0.64).toFixed(2)),
+    outputGain: Number(randFloat(0.68, 0.88).toFixed(2)),
+    selectedNode: 0,
+    nodes: randomizeNodePhysics(nodes.slice(0, MAX_AUDIO_NODES), movementPreset),
+  });
+}
+
+function syncFullPatch(params) {
+  window.GlidePathClearNodes?.();
+  window.GlidePathSetGravity?.(params.gravity);
+  window.GlidePathSetDamping?.(params.damping);
+  window.GlidePathSetBorderMargin?.(params.borderMargin);
+  window.GlidePathSetCenterMassEnabled?.(params.centerMassEnabled);
+  window.GlidePathSetCenterMass?.(params.centerMass);
+  window.GlidePathSetCenterMassRadius?.(params.centerMassRadius);
+  window.GlidePathSetCenterMassOrbit?.(params.centerMassOrbit);
+  params.nodes.forEach((node, index) => {
+    if (node.role !== 'muted') window.GlidePathAddNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
+  });
+  window.GlidePathApplyMovementPreset?.(params.movementPreset ?? 'orbital');
 }
 
 const BORDER_MODE_OPTIONS = { Repel: 'repel', Bounce: 'bounce', Wrap: 'wrap', None: 'none' };
@@ -844,7 +952,7 @@ export function createSidebar() {
         <button class="synth-btn" id="synth-prev-btn">Prev</button>
         <button class="synth-btn" id="synth-next-btn">Next</button>
         <button class="synth-btn" id="synth-add-btn">Add</button>
-        <button class="synth-btn" id="synth-random-btn">Random</button>
+        <button class="synth-btn" id="synth-random-btn">Randomize</button>
       </div>
       <div class="footer-label">View</div>
       <div class="synth-footer-row">
@@ -1085,12 +1193,8 @@ export function createSidebar() {
   });
 
   document.getElementById('synth-random-btn').addEventListener('click', () => {
-    const preset = params.movementPreset ?? 'orbital';
-    params.nodes = randomizeNodePhysics(params.nodes, preset);
-    params.nodes.forEach((node, index) => {
-      if (node.role !== 'muted') window.GlidePathSyncNode?.(index, node.name || `Node ${index + 1}`, node.role, physicsConfig(node));
-    });
-    window.GlidePathRandomizeNodes?.(preset);
+    createRandomPatch(params);
+    syncFullPatch(params);
     render();
   });
 
