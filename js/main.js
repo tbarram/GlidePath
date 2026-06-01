@@ -1,16 +1,21 @@
 import {
   initAudio,
+  isRecording,
+  loadSampleForNode,
   renderAudio,
+  startRecording,
+  stopRecording,
   suspendAudio,
   resumeAudio,
   isInitialized,
 } from './audio.js';
 import {
   createSidebar,
-  updateModeBadge,
   updateLevelBar,
   setStartButtonActive,
+  setRecordButtonActive,
   getStartButton,
+  getRecordButton,
 } from './sidebar.js';
 
 // ── Build the sidebar and grab the shared params object ──────────────
@@ -35,26 +40,60 @@ async function toggleAudio() {
 
 getStartButton()?.addEventListener('click', toggleAudio);
 
-// ── Main render loop: reads game state and drives the synth ──────────
-let lastGravityMode = null;
+async function ensureAudioRunning() {
+  if (!isInitialized()) await initAudio();
+  resumeAudio();
+  audioRunning = true;
+  setStartButtonActive(true);
+}
 
+function downloadRecording(blob) {
+  if (!blob) return;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `glidepath-${timestamp}.wav`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function toggleRecording() {
+  if (isRecording()) {
+    const blob = stopRecording();
+    setRecordButtonActive(false);
+    downloadRecording(blob);
+    return;
+  }
+
+  await ensureAudioRunning();
+  try {
+    startRecording();
+    setRecordButtonActive(true);
+  } catch (error) {
+    console.warn('[GlidePath Recorder]', error.message);
+  }
+}
+
+getRecordButton()?.addEventListener('click', toggleRecording);
+
+window.addEventListener('glidepath:load-sample', async ({ detail }) => {
+  if (!detail?.file) return;
+  await ensureAudioRunning();
+  await loadSampleForNode(detail.nodeIndex, detail.file);
+});
+
+// ── Main render loop: reads physics state and drives the audio engine ──
 function tick() {
   requestAnimationFrame(tick);
 
   const gp = window.GlidePath;
   if (!gp) return;
 
-  // Update mode badge whenever mode changes
-  if (gp.gravityMode !== lastGravityMode) {
-    updateModeBadge(gp.gravityMode);
-    lastGravityMode = gp.gravityMode;
-  }
-
-  // Level bar: show system energy in gravity mode, proximity in game mode
-  updateLevelBar(gp.gravityMode
-    ? Math.min(1, gp.systemEnergy ?? 0)
-    : (gp.proximity ?? 0)
-  );
+  // Level bar: show system energy
+  updateLevelBar(Math.min(1, gp.systemEnergy ?? 0));
 
   if (audioRunning) renderAudio(gp, params);
 }

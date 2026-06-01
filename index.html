@@ -2,33 +2,14 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8">
-		<title>Glide Path</title>
+		<title>GlidePath — Audio Motion Designer</title>
+		<style>
+			* { margin: 0; padding: 0; box-sizing: border-box; }
+			html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+		</style>
 	</head>
 	<body>
-
-		<div id="gravityControls" style="display:none">
-
-		  <input type="range" min="1" max="20" class="slider" id="numObjects">
-		  <p id="numObjects_value" style="font-family:courier;color:yellow;font-size:14px" ><span ></span></p>
-
-		  <button type="button" id="startBtn"></button>
-		  <button type="button" id="resetBtn">RESET</button>
-
-		  <p id="showTrails_Label" style="font-family:courier;color:yellow;font-size:14px" ><span ></span></p>
-
-		  <div>
-    		<input type="checkbox" id="trails_Off_Checkbox">
-    		<p id="trails_Off_Label" style="font-family:courier;color:yellow;font-size:14px" ><span ></span></p>
-    		<input type="checkbox" id="trails_On_Checkbox">
-    		<p id="trails_On_Label" style="font-family:courier;color:yellow;font-size:14px" ><span ></span></p>
-    		<input type="checkbox" id="trails_Timer_Checkbox">
-    		<p id="trails_Timer_Label" style="font-family:courier;color:yellow;font-size:14px" ><span ></span></p>
-  		  </div>
-
-		</div>
-
-		<script src="js/utils.js"></script>
-		<script src="js/glidePath.js"></script>
-		<script type="module" src="/js/main.js"></script>
+		<script src="js/GlidePath.js"></script>
+		<script type="module" src="js/main.js"></script>
 	</body>
 </html>

@@ -1,265 +1,556 @@
-import WebRenderer from '@elemaudio/web-renderer';
-import { el } from '@elemaudio/core';
+const MAX_AUDIO_NODES = 12;
 
-let core = null;
-let audioCtx = null;
-let initialized = false;
-
-// ─────────────────────────────────────────────────────────────────────
-//  SCALES  (semitones from root A)
-//  Angle around the ship is divided into equal arcs, one per scale note.
-//  As an object orbits, it sweeps through the notes in order.
-// ─────────────────────────────────────────────────────────────────────
 const SCALES = {
-  aminor:      [0, 2, 3, 5, 7, 8, 10],   // A B C D E F G
-  aminorpenta: [0, 3, 5, 7, 10],          // A C D E G
-  amajor:      [0, 2, 4, 5, 7, 9, 11],   // A B C# D E F# G#
-  adorian:     [0, 2, 3, 5, 7, 9, 10],   // A B C D E F# G
-  dminor:      [2, 5, 3, 7, 9, 8, 0],    // D E F G A Bb C (root D, expressed from A)
+  aminor: [0, 2, 3, 5, 7, 8, 10],
+  aminorpenta: [0, 3, 5, 7, 10],
+  amajor: [0, 2, 4, 5, 7, 9, 11],
+  adorian: [0, 2, 3, 5, 7, 9, 10],
+  dminor: [2, 5, 3, 7, 8, 10],
 };
 
-function getScale(name) { return SCALES[name] ?? SCALES.aminor; }
+const DEFAULT_NODE = {
+  role: 'muted',
+  enabled: true,
+};
 
-function midiToHz(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
+let engine = null;
 
-// Orbital position → discrete scale note
-// angle (0–360°): which sector the object is in → which degree of the scale
-// dist  (0–1):    register (close = low octave, far = high)
-function angleToFreq(angleDeg, dist, baseOctave, scaleName) {
-  const scale = getScale(scaleName);
-  const degree = Math.floor(((angleDeg % 360) / 360) * scale.length) % scale.length;
-  const octaveShift = dist < 0.25 ? -1 : dist > 0.65 ? 1 : 0;
-  const rootMidi = 45 + (baseOctave - 2) * 12; // A2 at baseOctave 2
-  return midiToHz(rootMidi + scale[degree] + octaveShift * 12);
+function clamp(value, min = 0, max = 1) {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
-// Amplitude envelope shape: bell curve, loudest at "orbital sweet spot"
-function distToAmp(dist) {
-  const peak = 0.28, width = 0.22;
-  return Math.min(1, Math.exp(-Math.pow(dist - peak, 2) / (2 * width * width)));
+function midiToHz(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-// How consonant are two objects based on angular separation?
-// Returns 1 (perfect consonance) → 0 (dissonant)
-function pairConsonance(a1, a2) {
-  const diff     = Math.abs((a1 - a2 + 360) % 360);
-  const mirrored = diff > 180 ? 360 - diff : diff;
-  const consonantCentres = [0, 102, 154, 180]; // unison, P5, m3, octave equivalents
-  return consonantCentres.some(c => Math.abs(mirrored - c) < 20) ? 1 : 0;
+function motionValue(obj, state, movement = 'distance') {
+  if (!obj) return 0;
+  switch (movement) {
+    case 'x': return clamp(obj.x ?? 0);
+    case 'y': return clamp(obj.y ?? 0);
+    case 'distance': return clamp(obj.dist ?? 0);
+    case 'interaction': return clamp(obj.interaction ?? 0);
+    case 'near': return 1 - clamp(obj.dist ?? 0);
+    case 'speed': return clamp(obj.speed ?? 0);
+    case 'acceleration': return clamp(obj.acceleration ?? 0);
+    case 'angle': return clamp((obj.angle ?? 0) / 360);
+    case 'angularVelocity': return clamp(Math.abs(obj.angularVelocity ?? 0));
+    case 'energy': return clamp(state.systemEnergy ?? 0);
+    case 'time': {
+      // Continuous time oscillation — useful as an LFO-like motion source
+      const t = state.timeSeconds ?? 0;
+      return (Math.sin(t * M_PI * 2 * 0.1) + 1) * 0.5;
+    }
+    default: return clamp(obj.dist ?? 0);
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-//  ORBITAL SYNTHESIS  (always 8 fixed voices)
-//
-//  Each gravity object → one voice:
-//    angle  → scale note (orbit = arpeggiation / chord voicing)
-//    dist   → octave register + amplitude (bell curve)
-//    speed  → vibrato depth & rate
-//    angVel → flanger rate & depth  (drag trail = delay)
-//
-//  Global:
-//    system energy     → master filter cutoff (chaos = bright)
-//    pair consonance   → resonance & reverb mix
-// ─────────────────────────────────────────────────────────────────────
-const MAX_VOICES   = 8;
+const M_PI = Math.PI;
 
-// Flanger sizes in samples (~15ms ceiling at 44100 Hz)
-const FLANGE_SIZE  = 2048;
-const FLANGE_MIN_S = 44;    // 1 ms
-const FLANGE_MAX_S = 441;   // 10 ms
-const VS_SIZE      = 1024;  // varispeed delay buffer
+function behaviorValue(obj, state, config) {
+  const behavior = config.behavior ?? 'spatial';
+  const movement = config.motionParam ?? 'angle';
+  const spatial = motionValue(obj, state, movement);
+  const timeRate = config.timeRate ?? 0.2;
+  const time = (Math.sin((state.timeSeconds ?? 0) * timeRate * M_PI * 2) + 1) * 0.5;
+  // Pseudo-random based on time + node id — gives repeatable but organic variation
+  const random = (Math.sin((state.timeSeconds ?? 0) * 7.13 + (obj?.id ?? 0) * 11.7) + 1) * 0.5;
 
-function buildOrbitalGraph(state, params) {
-  const { gravityObjects = [], systemEnergy = 0, objectCount = 0 } = state;
+  if (behavior === 'static') return 0.5;
+  if (behavior === 'time') return time;
+  if (behavior === 'random') return random;
+  if (behavior === 'spatial-time') return spatial * 0.6 + time * 0.4;
+  return spatial;
+}
 
-  const {
-    masterVolume        = 0.55,
-    baseOctave          = 2,
-    scale               = 'aminor',
-    detune              = 1.002,
-    filterQ             = 0.8,
-    reverbMix           = 0.38,
-    flangeMix           = 0.55,
-    vibratoDepth        = 0.010,
-    proximityDistortion = 0.4,
-    energyFilterScale   = 1.0,
-    // Stutter / varispeed
-    stutterRate         = 0,    // Hz — 0 = off
-    stutterDepth        = 0,    // 0–1 gate depth
-    varispeedAmount     = 0,    // 0–1 pitch-sweep depth
-  } = params;
+function targetMatches(target, sourceIndex) {
+  return target === 'mix' || target === 'sources' || target === `node-${sourceIndex}`;
+}
 
-  // ── System-level globals ───────────────────────────────────────────
-  const energyCutoff = 300 + Math.min(1, systemEnergy * energyFilterScale) * 4200;
+function normalizeNode(config) {
+  return { ...DEFAULT_NODE, ...(config ?? {}) };
+}
 
-  let consonanceScore = 0;
-  for (let i = 0; i < gravityObjects.length; i++)
-    for (let j = i + 1; j < gravityObjects.length; j++)
-      consonanceScore += pairConsonance(gravityObjects[i].angle, gravityObjects[j].angle);
-  const maxPairs       = Math.max(1, (objectCount * (objectCount - 1)) / 2);
-  const consonanceNorm = Math.min(1, consonanceScore / maxPairs);
-  const resonance      = filterQ + (1 - consonanceNorm) * 2.5;
-  const reverbAmt      = reverbMix * (0.5 + consonanceNorm * 0.5);
+function createNoiseBuffer(ctx) {
+  const length = ctx.sampleRate * 2;
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
+}
 
-  // ── Build 8 voices ────────────────────────────────────────────────
-  const voicesL = [];
-  const voicesR = [];
+function createImpulse(ctx, seconds = 2.4, decay = 2.8) {
+  const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < impulse.numberOfChannels; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return impulse;
+}
 
-  for (let i = 0; i < MAX_VOICES; i++) {
-    const obj    = gravityObjects[i];
-    const active = obj ? 1 : 0;
-    const angle  = obj?.angle           ?? (i * 45);
-    const dist   = obj?.dist            ?? 0.5;
-    const speed  = obj?.speed           ?? 0;
-    const angVel = obj?.angularVelocity ?? 0;
+function encodeWav(chunks, sampleRate) {
+  const channelCount = 2;
+  const totalFrames = chunks.reduce((sum, chunk) => sum + chunk[0].length, 0);
+  const byteLength = 44 + totalFrames * channelCount * 2;
+  const buffer = new ArrayBuffer(byteLength);
+  const view = new DataView(buffer);
+  let offset = 0;
 
-    const freq = angleToFreq(angle, dist, baseOctave, scale);
-    const amp  = distToAmp(dist) * active;
+  const writeString = (value) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset++, value.charCodeAt(i));
+  };
+  const writeUint32 = (value) => { view.setUint32(offset, value, true); offset += 4; };
+  const writeUint16 = (value) => { view.setUint16(offset, value, true); offset += 2; };
 
-    // ── Oscillator ──────────────────────────────────────────────────
-    // Vibrato: depth scales with orbital speed, rate with angular velocity
-    const vibRate = 0.4 + Math.abs(angVel) * 8 + speed * 4;
-    const vibLFO  = el.mul(
-      el.const({ key: `vd_${i}`, value: freq * speed * vibratoDepth }),
-      el.cycle(el.const({ key: `vr_${i}`, value: vibRate }))
-    );
-    const fMod1 = el.add(el.sm(el.const({ key: `f1_${i}`, value: freq })),          vibLFO);
-    const fMod2 = el.add(el.sm(el.const({ key: `f2_${i}`, value: freq * detune })), vibLFO);
+  writeString('RIFF');
+  writeUint32(byteLength - 8);
+  writeString('WAVE');
+  writeString('fmt ');
+  writeUint32(16);
+  writeUint16(1);
+  writeUint16(channelCount);
+  writeUint32(sampleRate);
+  writeUint32(sampleRate * channelCount * 2);
+  writeUint16(channelCount * 2);
+  writeUint16(16);
+  writeString('data');
+  writeUint32(totalFrames * channelCount * 2);
 
-    const osc = el.add(
-      el.mul(el.cycle(fMod1), el.const({ key: `og1_${i}`, value: 0.55 })),
-      el.mul(el.cycle(fMod2), el.const({ key: `og2_${i}`, value: 0.45 }))
-    );
-
-    // Sub-octave for objects near the ship (weight / gravity pull)
-    const subAmp = active * Math.max(0, 1 - dist / 0.3) * proximityDistortion;
-    const sub    = el.mul(
-      el.cycle(el.sm(el.const({ key: `sf_${i}`, value: freq * 0.5 }))),
-      el.const({ key: `sg_${i}`, value: subAmp * 0.3 })
-    );
-
-    let voice = el.add(osc, sub);
-
-    // ── Flanger: drag trail = delay ──────────────────────────────────
-    // The trail's length ≈ speed, curvature ≈ |angVel|
-    // flangeRate: how fast the delay sweeps (tighter orbit = faster sweep)
-    // flangeDepth: how much the delay modulates (faster object = deeper flange)
-    const fRate  = 0.3 + Math.abs(angVel) * 6 + speed * 2;
-    const fDepth = (FLANGE_MAX_S - FLANGE_MIN_S) * 0.5
-                   * Math.min(1, speed * 2 + Math.abs(angVel));
-
-    // Flange LFO sweeps the delay time
-    const flangeLFO  = el.mul(
-      el.const({ key: `fld_${i}`, value: fDepth }),
-      el.cycle(el.const({ key: `flr_${i}`, value: fRate }))
-    );
-    const flangeTime = el.add(
-      el.const({ key: `flb_${i}`, value: FLANGE_MIN_S + (FLANGE_MAX_S - FLANGE_MIN_S) * 0.4 }),
-      flangeLFO
-    );
-
-    // Comb filter: dry + delayed copy with feedback
-    const flanged     = el.delay({ size: FLANGE_SIZE }, flangeTime, 0.45, voice);
-    const flangedVoice = el.add(
-      el.mul(voice,   el.const({ key: `fldrymx_${i}`, value: 1 - flangeMix * 0.5 * active })),
-      el.mul(flanged, el.const({ key: `flwetmx_${i}`, value: flangeMix * active }))
-    );
-    voice = flangedVoice;
-
-    // ── Varispeed + Stutter ─────────────────────────────────────────
-    // Both are on always; when depth = 0 the math collapses to pass-through.
-
-    // VARISPEED: rising phasor sweeps delay time → pitch lowers then snaps back up
-    // Sweep depth scales with varispeedAmount (0 = no delay mod → no pitch change)
-    const vsDepthSamples = varispeedAmount * 320;
-    const vsRate         = Math.max(0.01, stutterRate * 0.5);
-    const vsLFO          = el.mul(
-      el.const({ key: `vsd_${i}`, value: vsDepthSamples }),
-      el.phasor(el.const({ key: `vsr_${i}`, value: vsRate }))
-    );
-    const vsDelayTime = el.add(
-      el.const({ key: `vsb_${i}`, value: 10 }),
-      vsLFO
-    );
-    const vsWet   = el.delay({ size: VS_SIZE }, vsDelayTime, 0.0, voice);
-    const vsBlend = el.const({ key: `vsamt_${i}`, value: varispeedAmount * 0.6 });
-    voice = el.add(
-      el.mul(voice, el.sub(el.const({ key: `vsdry_${i}`, value: 1 }), vsBlend)),
-      el.mul(vsWet, vsBlend)
-    );
-
-    // STUTTER GATE: tanh-sharpened sine → near-square wave at stutterRate
-    // sharpness 0 = sine (no stuttering); sharpness 10 = near-square (hard stutter)
-    // gate = lerp(1, squareWave, stutterDepth) so depth=0 is fully transparent
-    const sharpness  = stutterDepth * 10;
-    const squareWave = el.mul(
-      el.const({ key: `stsc_${i}`, value: 0.5 }),
-      el.add(
-        el.const({ key: `stbs_${i}`, value: 1 }),
-        el.tanh(el.mul(
-          el.cycle(el.const({ key: `strt_${i}`, value: Math.max(0.01, stutterRate) })),
-          el.const({ key: `stsh_${i}`, value: sharpness })
-        ))
-      )
-    );
-    // gate: fully open (1) when stutterDepth=0; oscillates 0→1 when stutterDepth=1
-    const gate = el.add(
-      el.const({ key: `stdry_${i}`, value: 1 - stutterDepth }),
-      el.mul(squareWave, el.const({ key: `stwet_${i}`, value: stutterDepth }))
-    );
-    voice = el.mul(voice, gate);
-
-    // ── Equal-power pan from angle ───────────────────────────────────
-    const panAngle = (angle * Math.PI) / 180;
-    const panL     = Math.cos(panAngle * 0.5 + Math.PI / 4);
-    const panR     = Math.sin(panAngle * 0.5 + Math.PI / 4);
-    const gainVal  = amp / Math.max(1, MAX_VOICES * 0.4);
-
-    voicesL.push(el.mul(voice, el.sm(el.const({ key: `gL_${i}`, value: gainVal * panL }))));
-    voicesR.push(el.mul(voice, el.sm(el.const({ key: `gR_${i}`, value: gainVal * panR }))));
+  for (const chunk of chunks) {
+    const left = chunk[0];
+    const right = chunk[1] ?? left;
+    for (let i = 0; i < left.length; i++) {
+      view.setInt16(offset, clamp(left[i], -1, 1) * 0x7fff, true);
+      offset += 2;
+      view.setInt16(offset, clamp(right[i], -1, 1) * 0x7fff, true);
+      offset += 2;
+    }
   }
 
-  // ── Sum & master processing ────────────────────────────────────────
-  const sumL  = voicesL.reduce((a, b) => el.add(a, b));
-  const sumR  = voicesR.reduce((a, b) => el.add(a, b));
-  const fc    = el.sm(el.const({ key: 'sys_fc', value: energyCutoff }));
-  const q     = el.sm(el.const({ key: 'sys_q',  value: resonance }));
-  const filtL = el.lowpass(fc, q, sumL);
-  const filtR = el.lowpass(fc, q, sumR);
-
-  const rvMix = el.sm(el.const({ key: 'rv_mix', value: reverbAmt }));
-  const revL  = el.mul(el.delay({ size: 44200 }, el.const({ key: 'rv_d1', value: 16537 }), 0.38, filtL), rvMix);
-  const revR  = el.mul(el.delay({ size: 44200 }, el.const({ key: 'rv_d2', value: 23400 }), 0.34, filtR), rvMix);
-
-  const vol = el.sm(el.const({ key: 'master_vol', value: masterVolume }));
-  return [
-    el.mul(el.add(filtL, revL), vol),
-    el.mul(el.add(filtR, revR), vol),
-  ];
+  return new Blob([buffer], { type: 'audio/wav' });
 }
 
-// ─────────────────────────────────────────────────────────────────────
+class SourceVoice {
+  constructor(engineRef, index) {
+    this.engine = engineRef;
+    this.index = index;
+    this.signature = '';
+    this.output = null;
+    this.gain = null;
+    this.pan = null;
+    this.filter = null;
+    this.source = null;
+    this.sourceKind = '';
+    this.send = {};
+  }
+
+  dispose() {
+    try { this.source?.stop(); } catch {}
+    try { this.source?.disconnect(); } catch {}
+    try { this.output?.disconnect(); } catch {}
+    this.source = null;
+    this.sourceKind = '';
+    this.output = null;
+    this.signature = '';
+  }
+
+  ensure(config) {
+    const sourceType = config.sourceType ?? 'scale';
+    const sample = this.engine.samples.get(this.index);
+    const sampleVersion = sample?.version ?? 0;
+    const signature = `${sourceType}:${config.waveform ?? 'sine'}:${sampleVersion}`;
+    if (signature === this.signature) return;
+
+    this.dispose();
+
+    const ctx = this.engine.ctx;
+    this.filter = ctx.createBiquadFilter();
+    this.filter.type = 'lowpass';
+    this.filter.frequency.value = config.filterCutoff ?? 8000;
+    this.filter.Q.value = 0.8;
+
+    this.gain = ctx.createGain();
+    this.gain.gain.value = 0;
+    this.pan = ctx.createStereoPanner();
+    this.pan.pan.value = 0;
+    this.output = this.pan;
+
+    this.filter.connect(this.gain);
+    this.gain.connect(this.pan);
+    this.pan.connect(this.engine.dryBus);
+
+    for (const name of ['echo', 'reverb', 'flanger']) {
+      const sendGain = ctx.createGain();
+      sendGain.gain.value = 0;
+      this.pan.connect(sendGain);
+      sendGain.connect(this.engine[`${name}Input`]);
+      this.send[name] = sendGain;
+    }
+
+    if (sourceType === 'noise') {
+      this.source = ctx.createBufferSource();
+      this.source.buffer = this.engine.noiseBuffer;
+      this.source.loop = true;
+      this.sourceKind = 'buffer';
+    } else if (sourceType === 'file' && sample?.buffer) {
+      this.source = ctx.createBufferSource();
+      this.source.buffer = sample.buffer;
+      this.source.loop = true;
+      this.source.playbackRate.value = 1;
+      this.sourceKind = 'buffer';
+    } else {
+      this.source = ctx.createOscillator();
+      this.source.type = config.waveform ?? 'sine';
+      this.source.frequency.value = midiToHz(config.midiNote ?? 57);
+      this.sourceKind = 'oscillator';
+    }
+
+    this.source.connect(this.filter);
+    this.source.start();
+    this.signature = signature;
+  }
+
+  update(obj, state, params, config, modulators, effects) {
+    this.ensure(config);
+
+    const ctx = this.engine.ctx;
+    const now = ctx.currentTime;
+    const sourceType = config.sourceType ?? 'scale';
+    const baseGain = (config.gain ?? 0.45) * (params.masterVolume ?? 0.65);
+    const motion = behaviorValue(obj, state, config);
+    const envAmp = 1 + modulators.amp;
+
+    // Use separate smoothing for pitch (faster) vs gain (slower to avoid clicks)
+    const gainSmooth = Math.max(0.02, modulators.time);
+    const pitchSmooth = Math.max(0.01, modulators.time * 0.5);
+
+    let frequency = midiToHz(config.midiNote ?? 57);
+    if (sourceType === 'scale') {
+      const scale = SCALES[config.scale ?? params.globalScale ?? 'aminor'] ?? SCALES.aminor;
+      const degree = Math.floor(motion * scale.length) % scale.length;
+      const octaveShift = motion < 0.25 ? -1 : motion > 0.75 ? 1 : 0;
+      const rootMidi = 45 + ((config.baseOctave ?? params.baseOctave ?? 2) - 2) * 12;
+      frequency = midiToHz(rootMidi + scale[degree] + octaveShift * 12);
+    } else if (sourceType === 'note') {
+      frequency = midiToHz((config.midiNote ?? 57) + (motion - 0.5) * (config.pitchDepth ?? 0));
+    }
+
+    // Apply pitch modulation
+    const pitchMod = 1 + modulators.pitch;
+    if (this.sourceKind === 'oscillator') {
+      this.source.frequency.setTargetAtTime(frequency * pitchMod, now, pitchSmooth);
+    } else if (sourceType === 'file' && this.source?.playbackRate) {
+      this.source.playbackRate.setTargetAtTime(clamp(pitchMod * 2 - 1, 0.25, 4), now, pitchSmooth);
+    }
+
+    // Gain — clamp to prevent distortion, use longer smoothing to avoid clicks
+    const sourceAmp = sourceType === 'noise' ? 0.55 : sourceType === 'file' ? 0.8 : 1;
+    const gain = config.enabled === false ? 0 : clamp(baseGain * sourceAmp * envAmp, 0, 1.4);
+    this.gain.gain.setTargetAtTime(gain, now, gainSmooth);
+
+    // Spatial panning
+    const pan = config.spacePan === false
+      ? (config.staticPan ?? 0)
+      : clamp(((obj?.x ?? 0.5) - 0.5) * 2 + modulators.pan, -1, 1);
+    this.pan.pan.setTargetAtTime(pan, now, 0.03);
+
+    // Filter with modulation
+    const cutoff = clamp((config.filterCutoff ?? 8000) * (1 + modulators.filter), 90, 18000);
+    this.filter.frequency.setTargetAtTime(cutoff, now, 0.025);
+
+    // Effect sends
+    for (const name of ['echo', 'reverb', 'flanger']) {
+      this.send[name].gain.setTargetAtTime(effects[name] ?? 0, now, 0.035);
+    }
+  }
+}
+
+class AudioDesignEngine {
+  constructor() {
+    this.ctx = null;
+    this.destination = null;
+    this.master = null;
+    this.voices = new Map();
+    this.samples = new Map();
+    this.sampleVersion = 0;
+    this.noiseBuffer = null;
+    this.recording = false;
+    this.recordedChunks = [];
+  }
+
+  async init() {
+    if (this.ctx) {
+      await this.ctx.resume();
+      return;
+    }
+
+    this.ctx = new AudioContext();
+    this.noiseBuffer = createNoiseBuffer(this.ctx);
+
+    this.dryBus = this.ctx.createGain();
+    this.preFilter = this.ctx.createGain();
+    this.filter = this.ctx.createBiquadFilter();
+    this.filter.type = 'lowpass';
+    this.filter.frequency.value = 18000;
+    this.compressor = this.ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -12;
+    this.compressor.ratio.value = 2;
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.8;
+
+    this.echoInput = this.ctx.createGain();
+    this.echoDelay = this.ctx.createDelay(2);
+    this.echoFeedback = this.ctx.createGain();
+    this.echoReturn = this.ctx.createGain();
+    this.echoDelay.delayTime.value = 0.22;
+    this.echoFeedback.gain.value = 0.28;
+    this.echoReturn.gain.value = 0.9;
+    this.echoInput.connect(this.echoDelay);
+    this.echoDelay.connect(this.echoFeedback);
+    this.echoFeedback.connect(this.echoDelay);
+    this.echoDelay.connect(this.echoReturn);
+
+    this.reverbInput = this.ctx.createGain();
+    this.reverb = this.ctx.createConvolver();
+    this.reverb.buffer = createImpulse(this.ctx);
+    this.reverbReturn = this.ctx.createGain();
+    this.reverbReturn.gain.value = 0.85;
+    this.reverbInput.connect(this.reverb);
+    this.reverb.connect(this.reverbReturn);
+
+    this.flangerInput = this.ctx.createGain();
+    this.flangerDelay = this.ctx.createDelay(0.03);
+    this.flangerReturn = this.ctx.createGain();
+    this.flangerFeedback = this.ctx.createGain();
+    this.flangerLfo = this.ctx.createOscillator();
+    this.flangerDepth = this.ctx.createGain();
+    this.flangerDelay.delayTime.value = 0.006;
+    this.flangerFeedback.gain.value = 0.2;
+    this.flangerReturn.gain.value = 0.9;
+    this.flangerLfo.frequency.value = 0.25;
+    this.flangerDepth.gain.value = 0.002;
+    this.flangerInput.connect(this.flangerDelay);
+    this.flangerDelay.connect(this.flangerFeedback);
+    this.flangerFeedback.connect(this.flangerDelay);
+    this.flangerDelay.connect(this.flangerReturn);
+    this.flangerLfo.connect(this.flangerDepth);
+    this.flangerDepth.connect(this.flangerDelay.delayTime);
+    this.flangerLfo.start();
+
+    this.dryBus.connect(this.preFilter);
+    this.echoReturn.connect(this.preFilter);
+    this.reverbReturn.connect(this.preFilter);
+    this.flangerReturn.connect(this.preFilter);
+    this.preFilter.connect(this.filter);
+    this.filter.connect(this.compressor);
+    this.compressor.connect(this.master);
+    this.master.connect(this.ctx.destination);
+
+    try {
+      await this.ctx.audioWorklet.addModule(new URL('./recording-worklet.js', import.meta.url));
+      this.recorder = new AudioWorkletNode(this.ctx, 'wav-recorder', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+      });
+      const silent = this.ctx.createGain();
+      silent.gain.value = 0;
+      this.master.connect(this.recorder);
+      this.recorder.connect(silent);
+      silent.connect(this.ctx.destination);
+      this.recorder.port.onmessage = ({ data }) => {
+        if (data?.type === 'chunk') this.recordedChunks.push(data.channels);
+      };
+    } catch (error) {
+      console.warn('[GlidePath Recorder]', error.message);
+    }
+  }
+
+  sync(state, params) {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+
+    const nodes = params.nodes ?? [];
+    const objects = state.gravityObjects ?? [];
+    const now = this.ctx.currentTime;
+    const sourceEffects = new Map();
+    const sourceMods = new Map();
+    const mixEffects = {
+      echo: 0,
+      reverb: 0,
+      flanger: 0,
+      cutoff: 18000,
+      compression: 0,
+      echoTime: 0.22,
+      echoFeedback: 0.28,
+      flangerRate: 0.25,
+      flangerDepth: 0.002,
+    };
+
+    for (let i = 0; i < MAX_AUDIO_NODES; i++) {
+      sourceEffects.set(i, { echo: 0, reverb: 0, flanger: 0 });
+      sourceMods.set(i, { amp: 0, pitch: 0, filter: 0, pan: 0, time: 0.04 });
+    }
+
+    for (let i = 0; i < MAX_AUDIO_NODES; i++) {
+      const config = normalizeNode(nodes[i]);
+      const obj = objects[i];
+      if (!config.enabled || !obj) continue;
+      const value = motionValue(obj, state, config.movement);
+      const shaped = config.polarity === 'inverse' ? 1 - value : value;
+      const amount = (config.amount ?? 0.5) * shaped;
+
+      if (config.role === 'envelope') {
+        for (let targetIndex = 0; targetIndex < MAX_AUDIO_NODES; targetIndex++) {
+          if (!targetMatches(config.target ?? 'sources', targetIndex)) continue;
+          const mod = sourceMods.get(targetIndex);
+          if (config.destination === 'pitch') mod.pitch += (amount - 0.25) * 0.08;
+          else if (config.destination === 'filter') mod.filter += amount * 2;
+          else if (config.destination === 'pan') mod.pan += (amount - 0.25) * 2;
+          else mod.amp += amount;
+          mod.time = Math.max(0.01, shaped > 0.5 ? (config.attack ?? 0.04) : (config.release ?? 0.2));
+        }
+      }
+
+      if (config.role === 'effect') {
+        const effectType = config.effectType ?? 'reverb';
+        const baseMix = config.baseMix ?? 0.2;
+        const wet = clamp(baseMix + amount);
+        if ((config.target ?? 'mix') === 'mix') {
+          if (effectType === 'echo') {
+            mixEffects.echo = Math.max(mixEffects.echo, wet);
+            mixEffects.echoTime = clamp(config.time ?? 0.25, 0.03, 1.5);
+            mixEffects.echoFeedback = clamp((config.feedback ?? 0.35) + shaped * 0.35, 0, 0.82);
+          } else if (effectType === 'flanger') {
+            mixEffects.flanger = Math.max(mixEffects.flanger, wet);
+            mixEffects.flangerRate = clamp(0.1 + shaped * 5, 0.05, 8);
+            mixEffects.flangerDepth = clamp(0.001 + shaped * 0.006, 0.0005, 0.012);
+          } else if (effectType === 'filter') {
+            mixEffects.cutoff = Math.min(mixEffects.cutoff, 180 + shaped * 9000);
+          } else if (effectType === 'compressor') {
+            mixEffects.compression = Math.max(mixEffects.compression, wet);
+          } else {
+            mixEffects.reverb = Math.max(mixEffects.reverb, wet);
+          }
+        } else {
+          for (let targetIndex = 0; targetIndex < MAX_AUDIO_NODES; targetIndex++) {
+            if (!targetMatches(config.target ?? 'sources', targetIndex)) continue;
+            const fx = sourceEffects.get(targetIndex);
+            if (effectType === 'echo') fx.echo = Math.max(fx.echo, wet);
+            else if (effectType === 'flanger') fx.flanger = Math.max(fx.flanger, wet);
+            else if (effectType === 'reverb') fx.reverb = Math.max(fx.reverb, wet);
+          }
+        }
+      }
+    }
+
+    this.echoReturn.gain.setTargetAtTime(0.9, now, 0.05);
+    this.reverbReturn.gain.setTargetAtTime(0.85, now, 0.05);
+    this.flangerReturn.gain.setTargetAtTime(0.9, now, 0.05);
+    this.echoDelay.delayTime.setTargetAtTime(mixEffects.echoTime, now, 0.05);
+    this.echoFeedback.gain.setTargetAtTime(mixEffects.echoFeedback, now, 0.05);
+    this.flangerLfo.frequency.setTargetAtTime(mixEffects.flangerRate, now, 0.05);
+    this.flangerDepth.gain.setTargetAtTime(mixEffects.flangerDepth, now, 0.05);
+    this.filter.frequency.setTargetAtTime(clamp(mixEffects.cutoff, 100, 18000), now, 0.05);
+    this.compressor.threshold.setTargetAtTime(-12 - mixEffects.compression * 28, now, 0.05);
+    this.compressor.ratio.setTargetAtTime(2 + mixEffects.compression * 10, now, 0.05);
+    this.master.gain.setTargetAtTime(params.outputGain ?? 0.85, now, 0.03);
+
+    for (let i = 0; i < MAX_AUDIO_NODES; i++) {
+      const config = normalizeNode(nodes[i]);
+      const obj = objects[i];
+      const isSource = config.role === 'source' && config.enabled !== false && obj;
+      if (!isSource) {
+        this.voices.get(i)?.dispose();
+        this.voices.delete(i);
+        continue;
+      }
+
+      if (!this.voices.has(i)) this.voices.set(i, new SourceVoice(this, i));
+      const nodeEffects = sourceEffects.get(i);
+      this.voices.get(i).update(
+        obj,
+        state,
+        params,
+        config,
+        sourceMods.get(i),
+        {
+          echo: Math.max(nodeEffects.echo, mixEffects.echo),
+          reverb: Math.max(nodeEffects.reverb, mixEffects.reverb),
+          flanger: Math.max(nodeEffects.flanger, mixEffects.flanger),
+        }
+      );
+    }
+  }
+
+  async loadSample(index, file) {
+    await this.init();
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = await this.ctx.decodeAudioData(arrayBuffer);
+    this.samples.set(index, {
+      buffer,
+      name: file.name,
+      version: ++this.sampleVersion,
+    });
+  }
+
+  startRecording() {
+    if (!this.recorder) throw new Error('Recorder worklet is not available');
+    this.recordedChunks = [];
+    this.recording = true;
+    this.recorder.port.postMessage({ type: 'recording', value: true });
+  }
+
+  stopRecording() {
+    if (!this.recorder || !this.recording) return null;
+    this.recorder.port.postMessage({ type: 'recording', value: false });
+    this.recording = false;
+    return encodeWav(this.recordedChunks, this.ctx.sampleRate);
+  }
+}
+
 export async function initAudio() {
-  if (initialized) { audioCtx?.resume(); return; }
-  audioCtx = new AudioContext();
-  core     = new WebRenderer();
-  const node = await core.initialize(audioCtx, {
-    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
-  });
-  node.connect(audioCtx.destination);
-  initialized = true;
+  if (!engine) engine = new AudioDesignEngine();
+  await engine.init();
 }
 
 export function renderAudio(state, params) {
-  if (!initialized || !core || audioCtx?.state !== 'running') return;
   try {
-    const [L, R] = buildOrbitalGraph(state, params);
-    core.render(L, R);
-  } catch (e) {
-    console.warn('[GlidePath Synth]', e.message);
+    engine?.sync(state, params);
+  } catch (error) {
+    console.warn('[GlidePath Audio]', error.message);
   }
 }
 
-export function suspendAudio()  { audioCtx?.suspend(); }
-export function resumeAudio()   { audioCtx?.resume(); }
-export function isInitialized() { return initialized; }
+export async function loadSampleForNode(index, file) {
+  if (!engine) engine = new AudioDesignEngine();
+  await engine.loadSample(index, file);
+}
+
+export function startRecording() {
+  engine?.startRecording();
+}
+
+export function stopRecording() {
+  return engine?.stopRecording() ?? null;
+}
+
+export function suspendAudio() {
+  engine?.ctx?.suspend();
+}
+
+export function resumeAudio() {
+  engine?.ctx?.resume();
+}
+
+export function isInitialized() {
+  return !!engine?.ctx;
+}
+
+export function isRecording() {
+  return !!engine?.recording;
+}

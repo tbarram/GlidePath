@@ -7,12 +7,7 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "@elemaudio/core": "^4.0.0",
-    "@elemaudio/web-renderer": "^4.0.0",
-    "tweakpane": "^4.0.5"
-  },
   "devDependencies": {
-    "vite": "^5.0.0"
+    "vite": "^8.0.14"
   }
 }

@@ -4,52 +4,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Running the app
 
-No build step. Open `index.html` directly in a browser (double-click or `open index.html`). There are no dependencies, bundlers, or package managers.
-
-URL params:
-- `?gravity=1` — start in gravity/N-body screen instead of the default game screen
-- `?debug=1` — enable debug overlays
+`npm run dev` starts the Vite dev server. Or open `index.html` directly in a browser.
 
 ## Architecture
 
-All game logic lives in `js/GlidePath.js` inside a single IIFE namespace `glide_path()`. `js/utils.js` contains only static pre-recorded data (no logic beyond `GetGroundCoords()`).
+GlidePath is a **real-time audio motion design tool**. Nodes (spheres) on a canvas interact through N-body gravity physics, and their movement parameters drive an audio synthesis engine to create motion-simulated sound.
 
-### Two screens
+### Core concept
 
-`GravityEnabled()` (returns `gGravityGameActive`) determines which mode is active. `SwitchScreens()` toggles between them; clicking the ship logo calls it.
+Each node is one of three types:
+- **Source** — generates sound (audio file, note, scale, or noise). Can be static, spatial-aware, time-aware, or random.
+- **Envelope** — modulates source parameters (amplitude, pitch, filter, pan) based on movement/gravity interactions.
+- **Effect** — processes audio (reverb, echo, flanger, filter, compressor) with parameters driven by spatial/motion data.
 
-- **Game screen** (default, `gGravityGameActive = false`): scrolling top/bottom terrain, fly the ship between the walls for score. Ground segments scroll right-to-left from pre-recorded arrays in `utils.js`.
-- **Gravity screen** (`gGravityGameActive = true`, URL `?gravity=1`): N-body gravity simulation with `gNumGravityObjects` draggable blobs. The ship sits fixed in the center.
+### File structure
 
-### Game loop
-
-`requestAnimationFrame` → `EventLoop()` → `DoOneFrame()`, which runs every frame in order:
-`ClearCanvas` → `DrawMiniMap` → `DrawAndUpdateGround` → `CalcRotationTime` → `CheckEnterSimulationMode` → `GetUserInput` → `DoObjectPairInteractions` → `CheckShipWithinLines` → `AnimateAndDrawObjects` → `CheckResetGravity` → `DoGame` → `DrawText` → `ShowScoreStats`
-
-### Object system
-
-Every entity (ship, gravity blobs, ground segments, bullets, explosions, text bubbles) is an instance of the `Object` class and lives in `gObjects[]`. `Object.update(deltaMS)` integrates velocity/acceleration, handles collision death, and calls the appropriate draw function. Gravity objects are also tracked in `gGravityObjects[]`; ground segments in `gGroundObjectsBottom[]` and `gGroundObjectsTop[]`.
-
-### Key globals
-
-| Variable | Purpose |
+| File | Purpose |
 |---|---|
-| `gShipObject` | The player ship |
-| `gGameState` | State machine: `eWaitingForStart / eStarting / eStarted / eEnded / eInactive` |
-| `gSimulationMode` | Auto-pilot using pre-recorded `gShipHistArray` (demo when idle) |
-| `gScore` / `gBestScore` | Scoring |
-| `gCapturingHistory` | Set to `true` to record new ship/ground data to console |
+| `js/GlidePath.js` | Physics engine & canvas renderer (IIFE). N-body gravity, node rendering, mouse drag interaction. Exposes `window.GlidePath` state object and `window.GlidePathAddNode/RemoveNode/ClearNodes/SyncNode/SetVisualPaused/SetShowTrails` APIs. |
+| `js/audio.js` | Web Audio API engine. Renders per-node audio based on physics state. Handles recording to WAV. Runs on audio thread via ScriptProcessorNode. |
+| `js/sidebar.js` | UI sidebar (ES module). Node configuration panel — add/remove/configure nodes, presets, play/pause/record controls. |
+| `js/main.js` | Entry point (ES module). Connects sidebar, audio engine, and physics canvas via requestAnimationFrame loop. |
+| `js/recording-worklet.js` | AudioWorklet for recording output to WAV. |
 
-### utils.js
+### Data flow
 
-Contains only static data consumed by GlidePath.js:
-- `gShipHistArray` — pre-recorded ship positions/angles for simulation/demo mode (`ShipHist` objects: x, y, angle, thrusting)
-- `gGroundArrayBottom` / `gGroundArrayTop` — pre-recorded ground segment dimensions (`GroundObj` objects: w, h) cycled via `GetGroundCoords()`
+1. `GlidePath.js` runs physics simulation, exposes `window.GlidePath` with per-node position/velocity/acceleration/interaction data each frame.
+2. `main.js` reads `window.GlidePath` on each rAF tick and calls `renderAudio(state, params)`.
+3. `audio.js` maps each node's physics data to audio parameters based on the node's configuration in `params.nodes[]`.
+4. `sidebar.js` provides the UI for configuring nodes and calls `window.GlidePathAddNode` etc. to sync visual nodes on canvas.
 
-### Scoring (game screen)
+### Controls
 
-Points accumulate while `gShipDistanceFromGround < kDistanceGameScoreCutoff` (48 px) and for completing 360° rotations. Ship collision with ground ends the run.
+- **Add Node** — creates a new source node on canvas
+- **Freeze/Move** — pauses/resumes physics simulation
+- **Trails** — toggle motion trails on nodes
+- **Clear** — removes all nodes
+- **Play/Pause** — starts/stops audio engine
+- **Record/Stop** — records output to WAV file
+- **Copy** — copies current params as JSON
 
-### Controls (game screen)
-
-Left/right arrow keys rotate; up arrow or `Z` thrusts; `X` shoots. Mouse drag moves gravity objects (gravity screen) or any object (game screen).
+Mouse drag moves nodes on canvas to experiment with gravitational interactions in real-time.
