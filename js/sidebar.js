@@ -26,6 +26,7 @@ const MOVEMENT_OPTIONS = {
   Energy: 'energy',
   Time: 'time',
 };
+const TIMING_OFFSET_OPTIONS = { None: 'none', 'Push/Pull Feel': 'pushPull', ...MOVEMENT_OPTIONS };
 const TARGET_OPTIONS = Object.fromEntries([
   ['All Sources', 'sources'],
   ['General Mix', 'mix'],
@@ -380,6 +381,8 @@ function createNode(role, overrides = {}) {
     instrument: 'synth',
     rhythm: '1/8',
     probability: 0.65,
+    timingOffsetSource: 'none',
+    timingOffsetAmount: 0,
     sourceType: 'scale',
     behavior: 'spatial',
     motionParam: 'angle',
@@ -477,6 +480,8 @@ function renderSource(node) {
     row('Instrument', select('node', 'instrument', node.instrument ?? 'synth', INSTRUMENT_OPTIONS)),
     row('Rhythm', select('node', 'rhythm', node.rhythm ?? '1/8', RHYTHM_OPTIONS)),
     row('Chance', range('node', 'probability', node.probability ?? 0.65, 0, 1, 0.01), Number(node.probability ?? 0.65).toFixed(2)),
+    row('Time Offset', select('node', 'timingOffsetSource', node.timingOffsetSource ?? 'none', TIMING_OFFSET_OPTIONS)),
+    row('Offset Amt', range('node', 'timingOffsetAmount', node.timingOffsetAmount ?? 0, 0, 0.85, 0.01), Number(node.timingOffsetAmount ?? 0).toFixed(2)),
     row('Sound Type', select('node', 'sourceType', node.sourceType, SOURCE_OPTIONS)),
     row('Motion Mode', select('node', 'behavior', node.behavior, BEHAVIOR_OPTIONS)),
     row('Reads', select('node', 'motionParam', node.motionParam, MOVEMENT_OPTIONS)),
@@ -649,6 +654,8 @@ const AUDIO_PRESET_OPTIONS = {
   'Minimal Static Design': 'minimalStaticDesign',
   'Swarm Delay Field': 'swarmDelayField',
   'Mix Spatial Glue': 'mixSpatialGlue',
+  'Heroic Forest Chords': 'heroicForestChords',
+  'Crystal Prelude': 'crystalPrelude',
   Blank: 'blank',
 };
 const AUDIO_PRESET_PARAMS = {
@@ -665,6 +672,8 @@ const AUDIO_PRESET_PARAMS = {
   minimalStaticDesign: { movementPreset: 'minimal', globalScale: 'aminor', bpm: 72, masterVolume: 0.5, outputGain: 0.82, centerMass: 0.2, centerMassRadius: 210, centerMassOrbit: 0.04 },
   swarmDelayField: { movementPreset: 'swarm', globalScale: 'dminor', bpm: 132, masterVolume: 0.5, outputGain: 0.68, centerMass: 0.95, centerMassRadius: 112, centerMassOrbit: -0.72 },
   mixSpatialGlue: { movementPreset: 'calm', globalScale: 'amajor', bpm: 84, masterVolume: 0.56, outputGain: 0.82, centerMass: 0.65, centerMassRadius: 155, centerMassOrbit: 0.2 },
+  heroicForestChords: { movementPreset: 'minimal', globalScale: 'alydian', bpm: 68, masterVolume: 0.5, outputGain: 0.84, centerMass: 0.42, centerMassRadius: 190, centerMassOrbit: 0.12 },
+  crystalPrelude: { movementPreset: 'calm', globalScale: 'amajorpenta', bpm: 76, masterVolume: 0.52, outputGain: 0.82, centerMass: 0.58, centerMassRadius: 165, centerMassOrbit: -0.18 },
 };
 
 function mutedNodes(count) {
@@ -1002,6 +1011,31 @@ export function createSidebar() {
       createNode('effect', { name: 'Master Glue', effectType: 'compressor', movement: 'energy', target: 'mix', baseMix: 0.16, amount: 0.28, size: 36, mass: 1.4, attraction: 0.36, repulsion: 0.85, orbit: 0.14 }),
       createNode('effect', { name: 'Depth Echo', effectType: 'echo', movement: 'orbit', target: 'mix', baseMix: 0.06, amount: 0.16, time: 0.42, feedback: 0.26, size: 30, mass: 0.9, attraction: 0.26, repulsion: 1.0, orbit: -0.2 }),
       ...mutedNodes(MAX_AUDIO_NODES - 6),
+    ],
+    heroicForestChords: () => [
+      createNode('source', { name: 'Open Root Pad', sourceType: 'note', behavior: 'spatial-time', motionParam: 'distance', waveform: 'triangle', midiNote: 45, pitchDepth: 1, gain: 0.16, ampFloor: 0.88, filterCutoff: 3600, size: 50, mass: 3.0, attraction: 0.58, repulsion: 0.62, orbit: 0.06, influenceRadius: 430 }),
+      createNode('source', { name: 'Lydian Third', sourceType: 'note', behavior: 'spatial-time', motionParam: 'orbit', waveform: 'sine', midiNote: 49, pitchDepth: 1, gain: 0.12, ampFloor: 0.84, filterCutoff: 4800, size: 42, mass: 2.1, attraction: 0.42, repulsion: 0.82, orbit: 0.18, influenceRadius: 380 }),
+      createNode('source', { name: 'Bright Fifth', sourceType: 'note', behavior: 'spatial-time', motionParam: 'near', waveform: 'triangle', midiNote: 52, pitchDepth: 1, gain: 0.12, ampFloor: 0.82, filterCutoff: 5400, size: 38, mass: 1.7, attraction: 0.35, repulsion: 0.95, orbit: -0.14, influenceRadius: 360 }),
+      createNode('source', { name: 'Raised Fourth Shimmer', sourceType: 'note', behavior: 'spatial-time', motionParam: 'y', waveform: 'sine', midiNote: 51, pitchDepth: 1, gain: 0.075, ampFloor: 0.74, filterCutoff: 8200, spacePan: true, size: 26, mass: 0.8, attraction: 0.18, repulsion: 1.28, orbit: 0.34 }),
+      createNode('source', { name: 'Fairy Bell Motif', instrument: 'pluck', rhythm: '1/2', probability: 0.42, timingOffsetSource: 'orbit', timingOffsetAmount: 0.18, sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', scale: 'alydian', baseOctave: 5, waveform: 'sine', gain: 0.14, filterCutoff: 12500, size: 22, mass: 0.58, attraction: 0.16, repulsion: 1.45, orbit: -0.42 }),
+      createNode('source', { name: 'Forest Air', sourceType: 'noise', behavior: 'spatial-time', motionParam: 'speed', gain: 0.04, ampFloor: 0.36, filterCutoff: 7600, size: 22, mass: 0.5, attraction: 0.08, repulsion: 1.2, orbit: 0.22 }),
+      createNode('envelope', { name: 'Heroic Swell', movement: 'distance', target: 'sources', destination: 'amp', amount: 0.18, attack: 0.75, release: 2.2, size: 28, mass: 0.8, attraction: 0.24, repulsion: 0.95, orbit: 0.12 }),
+      createNode('envelope', { name: 'Sunlight Filter', movement: 'y', target: 'sources', destination: 'filter', amount: 0.5, attack: 0.8, release: 2.5, size: 26, mass: 0.75, attraction: 0.22, repulsion: 1.0, orbit: -0.16 }),
+      createNode('effect', { name: 'Temple Hall', effectType: 'reverb', movement: 'near', target: 'mix', baseMix: 0.3, amount: 0.22, size: 40, mass: 1.2, attraction: 0.28, repulsion: 0.9, orbit: 0.14 }),
+      createNode('effect', { name: 'Soft Echo Trail', effectType: 'echo', movement: 'orbit', target: 'mix', baseMix: 0.05, amount: 0.12, time: 0.46, feedback: 0.22, size: 30, mass: 0.85, attraction: 0.22, repulsion: 1.0, orbit: -0.12 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 10),
+    ],
+    crystalPrelude: () => [
+      createNode('source', { name: 'Prelude Root', sourceType: 'note', behavior: 'spatial-time', motionParam: 'distance', waveform: 'sine', midiNote: 45, pitchDepth: 1, gain: 0.13, ampFloor: 0.84, filterCutoff: 4200, size: 48, mass: 2.5, attraction: 0.52, repulsion: 0.72, orbit: 0.1, influenceRadius: 400 }),
+      createNode('source', { name: 'Prelude Fifth', sourceType: 'note', behavior: 'spatial-time', motionParam: 'orbit', waveform: 'triangle', midiNote: 52, pitchDepth: 1, gain: 0.11, ampFloor: 0.82, filterCutoff: 5200, size: 40, mass: 1.8, attraction: 0.42, repulsion: 0.86, orbit: -0.16 }),
+      createNode('source', { name: 'Prelude Ninth', sourceType: 'note', behavior: 'spatial-time', motionParam: 'x', waveform: 'sine', midiNote: 59, pitchDepth: 1, gain: 0.075, ampFloor: 0.78, filterCutoff: 7200, size: 30, mass: 1.0, attraction: 0.24, repulsion: 1.12, orbit: 0.28 }),
+      createNode('source', { name: 'Crystal Arp', instrument: 'arp', rhythm: '1/4', probability: 0.58, timingOffsetSource: 'pushPull', timingOffsetAmount: 0.16, sourceType: 'scale', behavior: 'spatial-time', motionParam: 'nearest', scale: 'amajorpenta', baseOctave: 5, waveform: 'sine', gain: 0.13, filterCutoff: 13000, size: 22, mass: 0.55, attraction: 0.14, repulsion: 1.42, orbit: 0.45 }),
+      createNode('source', { name: 'Answer Harp', instrument: 'pluck', rhythm: '1/2', probability: 0.36, timingOffsetSource: 'distance', timingOffsetAmount: 0.12, sourceType: 'scale', behavior: 'spatial', motionParam: 'angle', scale: 'hirajoshi', baseOctave: 5, waveform: 'triangle', gain: 0.11, filterCutoff: 11800, size: 22, mass: 0.55, attraction: 0.14, repulsion: 1.45, orbit: -0.4 }),
+      createNode('envelope', { name: 'Prelude Breath', movement: 'interaction', target: 'sources', destination: 'amp', amount: 0.16, attack: 0.7, release: 1.9, size: 26, mass: 0.7, attraction: 0.22, repulsion: 1.0, orbit: 0.14 }),
+      createNode('envelope', { name: 'Crystal Opening', movement: 'orbit', target: 'sources', destination: 'filter', amount: 0.42, attack: 0.45, release: 1.4, size: 24, mass: 0.68, attraction: 0.2, repulsion: 1.05, orbit: -0.2 }),
+      createNode('effect', { name: 'Crystal Hall', effectType: 'reverb', movement: 'distance', target: 'mix', baseMix: 0.32, amount: 0.2, size: 38, mass: 1.1, attraction: 0.28, repulsion: 0.92, orbit: 0.12 }),
+      createNode('effect', { name: 'Shimmer Delay', effectType: 'echo', movement: 'angularVelocity', target: 'mix', baseMix: 0.08, amount: 0.16, time: 0.38, feedback: 0.28, size: 30, mass: 0.8, attraction: 0.22, repulsion: 1.0, orbit: -0.16 }),
+      ...mutedNodes(MAX_AUDIO_NODES - 9),
     ],
   };
 

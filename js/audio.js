@@ -37,6 +37,12 @@ function rhythmToBeats(value = '1/8') {
   return ({ '1/1': 4, '1/2': 2, '1/4': 1, '1/8': 0.5, '1/16': 0.25 })[value] ?? 0.5;
 }
 
+function timingOffsetValue(obj, state, source = 'none') {
+  if (!source || source === 'none') return 0;
+  if (source === 'pushPull') return ((obj?.orbit ?? 0) - (obj?.attraction ?? 0) + (obj?.repulsion ?? 0) * 0.5 + 0.5) * 0.5;
+  return motionValue(obj, state, source);
+}
+
 function noteFromMotion(obj, state, config, octaveOffset = 0) {
   const scale = SCALES[config.scale ?? state.globalScale ?? 'aminor'] ?? SCALES.aminor;
   const motion = behaviorValue(obj, state, config);
@@ -453,9 +459,9 @@ class AudioDesignEngine {
     return gain;
   }
 
-  triggerKick(velocity, pan = 0) {
+  triggerKick(velocity, pan = 0, when = this.ctx.currentTime) {
     const ctx = this.ctx;
-    const now = ctx.currentTime;
+    const now = Math.max(ctx.currentTime, when);
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const panner = ctx.createStereoPanner();
@@ -470,9 +476,9 @@ class AudioDesignEngine {
     osc.start(now); osc.stop(now + 0.36);
   }
 
-  triggerHat(velocity, pan = 0) {
+  triggerHat(velocity, pan = 0, when = this.ctx.currentTime) {
     const ctx = this.ctx;
-    const now = ctx.currentTime;
+    const now = Math.max(ctx.currentTime, when);
     const src = ctx.createBufferSource();
     const hp = ctx.createBiquadFilter();
     const gain = ctx.createGain();
@@ -487,9 +493,9 @@ class AudioDesignEngine {
     src.start(now); src.stop(now + 0.09);
   }
 
-  triggerSnare(velocity, pan = 0) {
+  triggerSnare(velocity, pan = 0, when = this.ctx.currentTime) {
     const ctx = this.ctx;
-    const now = ctx.currentTime;
+    const now = Math.max(ctx.currentTime, when);
     const noise = ctx.createBufferSource();
     const bp = ctx.createBiquadFilter();
     const ng = ctx.createGain();
@@ -511,9 +517,9 @@ class AudioDesignEngine {
     noise.start(now); body.start(now); noise.stop(now + 0.2); body.stop(now + 0.14);
   }
 
-  triggerPluck(midi, velocity, pan = 0, isBass = false) {
+  triggerPluck(midi, velocity, pan = 0, isBass = false, when = this.ctx.currentTime) {
     const ctx = this.ctx;
-    const now = ctx.currentTime;
+    const now = Math.max(ctx.currentTime, when);
     const osc = ctx.createOscillator();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
@@ -577,13 +583,26 @@ class AudioDesignEngine {
     const probability = clamp((config.probability ?? 0.65) * (0.55 + motion * 0.75 + (obj.interaction ?? 0) * 0.35), 0.02, 0.98);
     if (Math.random() > probability) return;
 
-    const velocity = clamp(0.35 + motion * 0.35 + (obj.speed ?? 0) * 0.2 + (obj.acceleration ?? 0) * 0.2, 0.18, 1);
+    const motionVelocity = clamp(0.35 + motion * 0.35 + (obj.speed ?? 0) * 0.2 + (obj.acceleration ?? 0) * 0.2, 0.18, 1);
+    // Triggered instruments are one-shot voices, so they do not pass through SourceVoice.update().
+    // Apply the node Level control here; otherwise hats/kicks ignore their volume slider.
+    const nodeLevel = clamp((config.gain ?? 0.45) * 2.8, 0, 1.4);
+    const inputTrim = clamp(params.masterVolume ?? 0.62, 0, 1.2);
+    const velocity = clamp(motionVelocity * nodeLevel * inputTrim, 0, 1.25);
+    if (velocity <= 0.0001) return;
+
+    const offsetSource = config.timingOffsetSource ?? 'none';
+    const offsetAmount = clamp(config.timingOffsetAmount ?? 0, 0, 0.85);
+    const offsetShape = timingOffsetValue(obj, state, offsetSource);
+    const offsetSeconds = stepSeconds * offsetAmount * clamp(offsetShape, 0, 1);
+    const scheduledTime = Math.max(this.ctx.currentTime, step * stepSeconds + offsetSeconds);
+
     const pan = clamp(((obj.x ?? 0.5) - 0.5) * 1.8, -0.9, 0.9);
-    if (instrument === 'kick') this.triggerKick(velocity, pan);
-    else if (instrument === 'snare') this.triggerSnare(velocity, pan);
-    else if (instrument === 'hat') this.triggerHat(velocity, pan);
-    else if (instrument === 'bass') this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, -1), velocity, pan, true);
-    else this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, instrument === 'arp' ? 0 : 0), velocity, pan, false);
+    if (instrument === 'kick') this.triggerKick(velocity, pan, scheduledTime);
+    else if (instrument === 'snare') this.triggerSnare(velocity, pan, scheduledTime);
+    else if (instrument === 'hat') this.triggerHat(velocity, pan, scheduledTime);
+    else if (instrument === 'bass') this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, -1), velocity, pan, true, scheduledTime);
+    else this.triggerPluck(noteFromMotion(obj, { ...state, globalScale: params.globalScale }, config, instrument === 'arp' ? 0 : 0), velocity, pan, false, scheduledTime);
   }
 
   sync(state, params) {
