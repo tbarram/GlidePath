@@ -239,7 +239,7 @@ export function createSidebar() {
     </div>
     <div class="synth-pane-host" id="synth-pane-host"></div>
     <footer class="synth-footer">
-      <button class="synth-btn" id="synth-mode-btn" disabled>⇄ Switch to GlidePath Mode</button>
+      <button class="synth-btn" id="synth-mode-btn">⇄ Switch to GlidePath Mode</button>
       <div class="synth-footer-row">
         <button class="synth-btn" id="synth-start-btn">▶ Start Audio</button>
         <button class="synth-btn" id="synth-copy-btn">⎘ Copy Params</button>
@@ -344,10 +344,7 @@ export function createSidebar() {
   });
 
   document.getElementById('synth-mode-btn').addEventListener('click', () => {
-    // Only switch when currently in gravity mode (to go → GlidePath game mode)
-    if (window.GlidePath?.gravityMode && window.GlidePathSwitchScreens) {
-      window.GlidePathSwitchScreens();
-    }
+    window.GlidePathSwitchScreens?.();
   });
 
   return { params, pane };
@@ -355,22 +352,16 @@ export function createSidebar() {
 
 // ── Update mode badge + switch button state ──────────────────────────
 export function updateModeBadge(gravityMode) {
-  const badge = document.getElementById('synth-mode-badge');
+  const badge   = document.getElementById('synth-mode-badge');
   const modeBtn = document.getElementById('synth-mode-btn');
 
   if (badge) {
-    if (gravityMode) {
-      badge.textContent = 'GRAVITY';
-      badge.classList.add('gravity-mode');
-    } else {
-      badge.textContent = 'GAME';
-      badge.classList.remove('gravity-mode');
-    }
+    badge.textContent = gravityMode ? 'GRAVITY' : 'GAME';
+    badge.classList.toggle('gravity-mode', gravityMode);
   }
 
   if (modeBtn) {
-    // Enable the button only when in gravity mode (there's somewhere to switch TO)
-    modeBtn.disabled = !gravityMode;
+    modeBtn.textContent = gravityMode ? '⇄ Switch to GlidePath Mode' : '⇄ Switch to Gravity Mode';
   }
 }
 

@@ -71,7 +71,7 @@ let sGravitySettingsBest = {};
 const urlParams = new URLSearchParams(window.location.search);
 let gNumGravityObjects = 7;
 const gDebugMode = urlParams.get('debug');
-let gGravityGameActive = urlParams.get('gravity');
+let gGravityGameActive = !urlParams.get('game'); // gravity by default; ?game=1 for game mode
 const kShipGravityV = 140; // 100
 
 let gSimulationMode = !gGravityGameActive;
